@@ -1,0 +1,43 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dunegon 3D</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="lobby">
+        <h1>Dunegon 3D</h1>
+        <p id="lobby-subtitle">A first-person dungeon crawler</p>
+        <div class="lobby-btn-group">
+            <button onclick="startSolo()">Play Solo</button>
+            <button onclick="hostGame()">Host Multiplayer</button>
+        </div>
+        <div id="host-code-area" style="display:none;">
+            <p class="code-label">Share this code with your partner:</p>
+            <div id="room-code">---</div>
+        </div>
+        <div class="lobby-join">
+            <input id="join-code" type="text" placeholder="Enter room code..." autocomplete="off" />
+            <button onclick="joinGame()">Join Game</button>
+        </div>
+        <div id="lobby-status"></div>
+    </div>
+
+    <div id="hud">
+        <div id="status"></div>
+        <div id="crosshair">+</div>
+        <div id="sprint-bar-wrap">
+            <div id="sprint-label">SPRINT</div>
+            <div id="sprint-bar"><div id="sprint-fill"></div></div>
+        </div>
+        <div id="controls">W/S: Move &nbsp;|&nbsp; A/D: Turn &nbsp;|&nbsp; SHIFT: Sprint &nbsp;|&nbsp; R: Restart</div>
+    </div>
+
+    <canvas id="dungeon-canvas"></canvas>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+    <script src="main.js"></script>
+</body>
+</html>
