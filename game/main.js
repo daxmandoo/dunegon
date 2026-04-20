@@ -108,8 +108,60 @@ floorTex.repeat.set(GRID*1.5, GRID*1.5);
 var ceilTex = makeBrickTex();
 ceilTex.repeat.set(GRID, GRID);
 
-// ── Materials ──
-var wallMat   = new THREE.MeshStandardMaterial({ map: brickTex, roughness: 0.95, metalness: 0.0, color: 0xaa99cc });
+// ── Custom Wall Shader ──
+var wallVert = [
+"varying vec2 vUv;",
+"varying vec3 vNormal;",
+"varying vec3 vWorldPos;",
+"void main() {",
+"  vUv = uv;",
+"  vNormal = normalize(normalMatrix * normal);",
+"  vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;",
+"  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);",
+"}"
+].join("\n");
+
+var wallFrag = [
+"uniform float time;",
+"uniform sampler2D brickMap;",
+"varying vec2 vUv;",
+"varying vec3 vNormal;",
+"varying vec3 vWorldPos;",
+"",
+"float rand(vec2 co) { return fract(sin(dot(co, vec2(12.9898,78.233))) * 43758.5453); }",
+"float noise(vec2 p) {",
+"  vec2 i = floor(p); vec2 f = fract(p);",
+"  f = f*f*(3.0-2.0*f);",
+"  return mix(mix(rand(i),rand(i+vec2(1,0)),f.x),mix(rand(i+vec2(0,1)),rand(i+vec2(1,1)),f.x),f.y);",
+"}",
+"",
+"void main() {",
+"  vec4 brick = texture2D(brickMap, vUv);",
+"  // Moss / moisture streaks on lower parts of wall",
+"  float mossFactor = clamp(1.0 - vWorldPos.y * 0.9, 0.0, 1.0);",
+"  float mossNoise = noise(vUv * 6.0 + vec2(0.0, time * 0.03));",
+"  vec3 mossCol = vec3(0.06, 0.14, 0.06);",
+"  vec3 col = mix(brick.rgb, mossCol, mossFactor * mossNoise * 0.6);",
+"  // Edge darkening (fake AO on brick seams)",
+"  float brickU = fract(vUv.x * 4.0);",
+"  float brickV = fract(vUv.y * 4.0);",
+"  float seam = min(min(brickU, 1.0-brickU), min(brickV, 1.0-brickV));",
+"  col *= 0.75 + 0.25 * smoothstep(0.02, 0.12, seam);",
+"  // Lambertian lighting approximation",
+"  float nDotUp = abs(dot(vNormal, vec3(0.0, 1.0, 0.0)));",
+"  col *= 0.6 + 0.4 * nDotUp;",
+"  gl_FragColor = vec4(col, 1.0);",
+"}"
+].join("\n");
+
+var wallMat = new THREE.ShaderMaterial({
+    vertexShader: wallVert,
+    fragmentShader: wallFrag,
+    uniforms: {
+        time:     { value: 0.0 },
+        brickMap: { value: brickTex }
+    }
+});
 var floorMat  = new THREE.MeshStandardMaterial({ map: floorTex, roughness: 1.0,  metalness: 0.0, color: 0x445544 });
 var ceilMat   = new THREE.MeshStandardMaterial({ map: ceilTex,  roughness: 1.0,  metalness: 0.0, color: 0x222233 });
 var enemyMat  = new THREE.MeshStandardMaterial({ color: 0xcc2211, roughness: 0.6, metalness: 0.3, emissive: new THREE.Color(0x550000) });
@@ -346,7 +398,7 @@ function animate(now) {
 
     if (gameOver || won) return;
 
-    // ── Turning ──
+    // ── Turning (only when pointer NOT locked — otherwise A/D strafe) ──
     if (!pointerLocked) {
         if (keys["ArrowLeft"]  || keys["a"] || keys["A"]) player.angle += TURN_SPEED * dt;
         if (keys["ArrowRight"] || keys["d"] || keys["D"]) player.angle -= TURN_SPEED * dt;
@@ -368,6 +420,11 @@ function animate(now) {
     var nx = player.x, nz = player.z;
     if (keys["ArrowUp"]   || keys["w"] || keys["W"]) { nx -= sinA * speed * dt; nz -= cosA * speed * dt; }
     if (keys["ArrowDown"] || keys["s"] || keys["S"]) { nx += sinA * speed * dt; nz += cosA * speed * dt; }
+    // A/D strafe when pointer locked, else turn (handled above)
+    if (pointerLocked) {
+        if (keys["a"] || keys["A"] || keys["ArrowLeft"])  { nx -= cosA * speed * dt; nz += sinA * speed * dt; }
+        if (keys["d"] || keys["D"] || keys["ArrowRight"]) { nx += cosA * speed * dt; nz -= sinA * speed * dt; }
+    }
 
     var r = PLAYER_RADIUS;
     var gzc = Math.floor(player.z / CELL);
@@ -401,6 +458,22 @@ function animate(now) {
     });
 
     if (items.every(function(i){ return i.collected; }) && enemies.every(function(e){ return !e.alive; })) won = true;
+
+    // ── Update shader uniforms ──
+    if (wallMat.uniforms) wallMat.uniforms.time.value = now / 1000.0;
+
+    // ── Wall proximity vignette (collision feedback) ──
+    var wallVigR = PLAYER_RADIUS + 0.5;
+    var px = player.x, pz = player.z;
+    var nearWall = (
+        isWall(Math.floor((px - wallVigR) / CELL), Math.floor(pz / CELL)) ||
+        isWall(Math.floor((px + wallVigR) / CELL), Math.floor(pz / CELL)) ||
+        isWall(Math.floor(px / CELL), Math.floor((pz - wallVigR) / CELL)) ||
+        isWall(Math.floor(px / CELL), Math.floor((pz + wallVigR) / CELL))
+    );
+    canvas.style.boxShadow = nearWall
+        ? "inset 0 0 60px 30px rgba(255,80,0,0.45)"
+        : "inset 0 0 40px 10px rgba(0,0,0,0.6)";
 
     // ── Head bob ──
     var isMoving = (keys["w"]||keys["W"]||keys["ArrowUp"]||keys["s"]||keys["S"]||keys["ArrowDown"]);
