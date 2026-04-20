@@ -169,6 +169,21 @@ document.addEventListener("keydown", function(e) {
 document.addEventListener("keyup", function(e) { keys[e.key] = false; });
 
 var TURN_SPEED = 1.5, PLAYER_RADIUS = 0.9;
+var pointerLocked = false;
+const MOUSE_SENSITIVITY = 0.0022;
+
+// ── Pointer Lock (Mouse Look) ──
+canvas.addEventListener("click", function() {
+    if (!pointerLocked) canvas.requestPointerLock();
+});
+document.addEventListener("pointerlockchange", function() {
+    pointerLocked = (document.pointerLockElement === canvas);
+});
+document.addEventListener("mousemove", function(e) {
+    if (pointerLocked && gameRunning && !gameOver && !won) {
+        player.angle -= e.movementX * MOUSE_SENSITIVITY;
+    }
+});
 var lastTime = performance.now();
 
 // ── Remote player ──
@@ -270,8 +285,10 @@ function animate(now) {
     if (gameOver || won) return;
 
     // ── Turning ──
-    if (keys["ArrowLeft"]  || keys["a"] || keys["A"]) player.angle += TURN_SPEED * dt;
-    if (keys["ArrowRight"] || keys["d"] || keys["D"]) player.angle -= TURN_SPEED * dt;
+    if (!pointerLocked) {
+        if (keys["ArrowLeft"]  || keys["a"] || keys["A"]) player.angle += TURN_SPEED * dt;
+        if (keys["ArrowRight"] || keys["d"] || keys["D"]) player.angle -= TURN_SPEED * dt;
+    }
 
     // ── Sprint stamina ──
     var sprinting = (keys["Shift"] || keys["ShiftLeft"] || keys["ShiftRight"]) && stamina > 0;
