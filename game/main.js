@@ -168,7 +168,7 @@ document.addEventListener("keydown", function(e) {
 });
 document.addEventListener("keyup", function(e) { keys[e.key] = false; });
 
-var TURN_SPEED = 2.2, PLAYER_RADIUS = 0.9;
+var TURN_SPEED = 1.5, PLAYER_RADIUS = 0.9;
 var lastTime = performance.now();
 
 // ── Remote player ──
