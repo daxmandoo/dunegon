@@ -16,7 +16,9 @@ scene.fog = new THREE.Fog(0x080810, 6, 24);
 var camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
 camera.rotation.order = "YXZ";
 
-var renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+var renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: false });
+var PIXEL_RATIO = 0.35; // render at 35% resolution then upscale = pixelated look
+renderer.setPixelRatio(PIXEL_RATIO);
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -28,7 +30,6 @@ window.addEventListener("resize", function() {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
 });
-
 // ── Dungeon ──
 var CELL = 4, GRID = 10;
 var MAP = [
@@ -72,39 +73,46 @@ scene.add(torchLight);
 
 // ── Procedural Textures ──
 function makeBrickTex() {
-    var cv = document.createElement("canvas"); cv.width = 128; cv.height = 128;
+    // 16x16 pixelated voxel stone tile
+    var cv = document.createElement("canvas"); cv.width = 16; cv.height = 16;
     var ctx = cv.getContext("2d");
-    ctx.fillStyle = "#2e2828"; ctx.fillRect(0,0,128,128);
-    for (var i = 0; i < 5000; i++) {
-        var px = Math.random()*128, py = Math.random()*128;
-        var v = Math.floor(Math.random()*60-20);
-        var c = 58+v; ctx.fillStyle = "rgb("+c+","+(c-8)+","+(c-14)+")"; ctx.fillRect(px,py,Math.random()*3+1,Math.random()*2+1);
+    var stoneColors = ["#3a3535","#433e3e","#4a4444","#302c2c","#3e3939"];
+    for (var py=0; py<16; py++) for (var ppx=0; ppx<16; ppx++) {
+        ctx.fillStyle = stoneColors[Math.floor(Math.abs(Math.sin(ppx*7+py*13)*5))];
+        ctx.fillRect(ppx,py,1,1);
     }
-    var bH=16, bW=32;
-    for (var row=0; row<8; row++) {
-        ctx.fillStyle="#0e0c0c"; ctx.fillRect(0,row*bH,128,2);
-        var off=(row%2)*(bW/2);
-        for (var bx=-bW+off; bx<128; bx+=bW) { ctx.fillStyle="#0e0c0c"; ctx.fillRect(bx,row*bH+2,2,bH-2); }
-    }
-    var t=new THREE.CanvasTexture(cv); t.wrapS=t.wrapT=THREE.RepeatWrapping; return t;
+    // mortar lines (grid pattern)
+    ctx.fillStyle = "#1a1818";
+    for (var my=0; my<16; my+=8) ctx.fillRect(0,my,16,1);
+    ctx.fillRect(0,0,1,8); ctx.fillRect(8,8,1,8);
+    var t = new THREE.CanvasTexture(cv);
+    t.magFilter = THREE.NearestFilter;
+    t.minFilter = THREE.NearestFilter;
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    return t;
 }
 function makeFloorTex() {
-    var cv = document.createElement("canvas"); cv.width = 128; cv.height = 128;
+    // 16x16 pixelated voxel dirt/stone floor
+    var cv = document.createElement("canvas"); cv.width = 16; cv.height = 16;
     var ctx = cv.getContext("2d");
-    ctx.fillStyle = "#171512"; ctx.fillRect(0,0,128,128);
-    for (var i = 0; i < 4000; i++) {
-        var px=Math.random()*128, py=Math.random()*128, v=Math.floor(Math.random()*40);
-        ctx.fillStyle="rgba(255,245,230,"+(v/255)+")"; ctx.fillRect(px,py,Math.random()*2+1,1);
+    var floorColors = ["#1e1c17","#221f19","#252219","#1a1812","#201d15"];
+    for (var py=0; py<16; py++) for (var ppx=0; ppx<16; ppx++) {
+        ctx.fillStyle = floorColors[Math.floor(Math.abs(Math.sin(ppx*3+py*17)*5))];
+        ctx.fillRect(ppx,py,1,1);
     }
-    ctx.strokeStyle="#090807"; ctx.lineWidth=2;
-    for (var tx=0; tx<128; tx+=32) { ctx.beginPath(); ctx.moveTo(tx,0); ctx.lineTo(tx,128); ctx.stroke(); }
-    for (var ty=0; ty<128; ty+=32) { ctx.beginPath(); ctx.moveTo(0,ty); ctx.lineTo(128,ty); ctx.stroke(); }
-    var t=new THREE.CanvasTexture(cv); t.wrapS=t.wrapT=THREE.RepeatWrapping; return t;
+    ctx.fillStyle = "#111009";
+    for (var mx=0; mx<16; mx+=8) ctx.fillRect(mx,0,1,16);
+    for (var mmy=0; mmy<16; mmy+=8) ctx.fillRect(0,mmy,16,1);
+    var t = new THREE.CanvasTexture(cv);
+    t.magFilter = THREE.NearestFilter;
+    t.minFilter = THREE.NearestFilter;
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    return t;
 }
 var brickTex = makeBrickTex();
 brickTex.repeat.set(1,1);
 var floorTex = makeFloorTex();
-floorTex.repeat.set(GRID*1.5, GRID*1.5);
+floorTex.repeat.set(GRID*2, GRID*2);
 var ceilTex = makeBrickTex();
 ceilTex.repeat.set(GRID, GRID);
 
@@ -168,11 +176,35 @@ var enemyMat  = new THREE.MeshStandardMaterial({ color: 0xcc2211, roughness: 0.6
 var itemMat   = new THREE.MeshStandardMaterial({ color: 0x44ff88, roughness: 0.2, metalness: 0.8, emissive: new THREE.Color(0x114422) });
 var remoteMat = new THREE.MeshStandardMaterial({ color: 0x3399ff, roughness: 0.6, metalness: 0.3, emissive: new THREE.Color(0x001144) });
 
-// ── Geometries ──
+// ── Voxel Enemy builder ──
+function makeVoxelEnemy() {
+    var group = new THREE.Group();
+    var mat = enemyMat.clone();
+    var s = 0.38;
+    // head
+    var head = new THREE.Mesh(new THREE.BoxGeometry(s*2,s*2,s*2), mat);
+    head.position.set(0, 1.7, 0); head.castShadow=true; group.add(head);
+    // body
+    var body = new THREE.Mesh(new THREE.BoxGeometry(s*2.4, s*3, s*1.4), mat);
+    body.position.set(0, 0.85, 0); body.castShadow=true; group.add(body);
+    // left arm
+    var lArm = new THREE.Mesh(new THREE.BoxGeometry(s*0.9, s*2.6, s*0.9), mat);
+    lArm.position.set(-s*1.65, 0.85, 0); lArm.castShadow=true; group.add(lArm);
+    // right arm
+    var rArm = new THREE.Mesh(new THREE.BoxGeometry(s*0.9, s*2.6, s*0.9), mat);
+    rArm.position.set( s*1.65, 0.85, 0); rArm.castShadow=true; group.add(rArm);
+    // left leg
+    var lLeg = new THREE.Mesh(new THREE.BoxGeometry(s*1.1, s*2.8, s*1.1), mat);
+    lLeg.position.set(-s*0.7, -0.3, 0); lLeg.castShadow=true; group.add(lLeg);
+    // right leg
+    var rLeg = new THREE.Mesh(new THREE.BoxGeometry(s*1.1, s*2.8, s*1.1), mat);
+    rLeg.position.set( s*0.7, -0.3, 0); rLeg.castShadow=true; group.add(rLeg);
+    return group;
+}
+// ── Voxel Item ──
+var itemGeo = new THREE.BoxGeometry(0.55, 0.55, 0.55);
 var wallGeo   = new THREE.BoxGeometry(CELL, CELL, CELL);
 var floorGeo  = new THREE.PlaneGeometry(GRID * CELL, GRID * CELL);
-var enemyGeo  = new THREE.BoxGeometry(0.9, 2.2, 0.9);
-var itemGeo   = new THREE.OctahedronGeometry(0.55, 1);
 var remoteGeo = new THREE.BoxGeometry(0.9, 1.9, 0.9);
 
 // ── Build static dungeon ──
@@ -227,9 +259,8 @@ function initGame(startX, startZ) {
     gameOver = false; won = false; stamina = maxStamina;
 
     ENEMY_CELLS.forEach(function(pos) {
-        var mesh = new THREE.Mesh(enemyGeo, enemyMat.clone());
+        var mesh = makeVoxelEnemy();
         mesh.position.copy(cellCenter(pos.gx, pos.gz));
-        mesh.castShadow = true;
         mesh.add(new THREE.PointLight(0xff2200, 1.8, 8));
         scene.add(mesh);
         enemies.push({ mesh: mesh, gx: pos.gx, gz: pos.gz, alive: true });
@@ -414,17 +445,20 @@ function animate(now) {
     sprintFill.style.width = (stamina / maxStamina * 100) + "%";
     sprintFill.style.background = sprinting ? "#ff5555" : (stamina < 30 ? "#ffb86c" : "#50fa7b");
 
-    // ── Movement ──
+    // ── Movement (normalized so diagonal isn't faster) ──
     var speed = sprinting ? SPRINT_SPEED : MOVE_SPEED;
     var sinA = Math.sin(player.angle), cosA = Math.cos(player.angle);
-    var nx = player.x, nz = player.z;
-    if (keys["ArrowUp"]   || keys["w"] || keys["W"]) { nx -= sinA * speed * dt; nz -= cosA * speed * dt; }
-    if (keys["ArrowDown"] || keys["s"] || keys["S"]) { nx += sinA * speed * dt; nz += cosA * speed * dt; }
-    // A/D strafe when pointer locked, else turn (handled above)
-    if (pointerLocked) {
-        if (keys["a"] || keys["A"] || keys["ArrowLeft"])  { nx -= cosA * speed * dt; nz += sinA * speed * dt; }
-        if (keys["d"] || keys["D"] || keys["ArrowRight"]) { nx += cosA * speed * dt; nz -= sinA * speed * dt; }
-    }
+    var moveX = 0, moveZ = 0;
+    var fwd  = (keys["ArrowUp"]    || keys["w"] || keys["W"]) ? 1 : 0;
+    var back = (keys["ArrowDown"]  || keys["s"] || keys["S"]) ? 1 : 0;
+    var strafeL = (pointerLocked && (keys["a"] || keys["A"] || keys["ArrowLeft"]))  ? 1 : 0;
+    var strafeR = (pointerLocked && (keys["d"] || keys["D"] || keys["ArrowRight"])) ? 1 : 0;
+    moveX += -sinA * (fwd - back) + (-cosA) * (strafeL - strafeR);
+    moveZ += -cosA * (fwd - back) + ( sinA) * (strafeL - strafeR);
+    var moveLen = Math.sqrt(moveX*moveX + moveZ*moveZ);
+    if (moveLen > 1.0) { moveX /= moveLen; moveZ /= moveLen; }
+    var nx = player.x + moveX * speed * dt;
+    var nz = player.z + moveZ * speed * dt;
 
     var r = PLAYER_RADIUS;
     var gzc = Math.floor(player.z / CELL);
@@ -493,13 +527,14 @@ function animate(now) {
     var t = now / 1000;
     enemies.forEach(function(e, idx) {
         if (!e.alive) return;
-        e.mesh.position.y = CELL/2 + Math.sin(t*1.8 + idx*1.2) * 0.25;
-        e.mesh.rotation.y = t * 1.5;
+        e.mesh.position.y = Math.sin(t*1.8 + idx*1.2) * 0.18;
+        e.mesh.rotation.y = t * 1.2;
     });
     items.forEach(function(i, idx) {
         if (i.collected) return;
-        i.mesh.position.y = CELL/2 + Math.sin(t*2.5 + idx*0.9) * 0.3;
-        i.mesh.rotation.y = t * 2.5;
+        i.mesh.position.y = CELL/2 + Math.sin(t*2.5 + idx*0.9) * 0.25;
+        i.mesh.rotation.y = t * 3.0;
+        i.mesh.rotation.x = t * 2.0;
     });
 
     // ── Multiplayer sync ──
