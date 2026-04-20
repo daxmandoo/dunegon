@@ -18,6 +18,10 @@ camera.rotation.order = "YXZ";
 
 var renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.9;
 
 window.addEventListener("resize", function() {
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -50,23 +54,73 @@ function cellCenter(gx, gz) {
 }
 
 // ── Lighting ──
-scene.add(new THREE.AmbientLight(0x112244, 1.8));
-var torchLight = new THREE.PointLight(0xff8833, 3, 16);
+scene.add(new THREE.AmbientLight(0x110e22, 0.5));
+var torchLight = new THREE.PointLight(0xff7722, 4.0, 14);
+torchLight.castShadow = true;
+torchLight.shadow.mapSize.width = 512;
+torchLight.shadow.mapSize.height = 512;
+torchLight.shadow.camera.near = 0.2;
+torchLight.shadow.camera.far = 14;
 scene.add(torchLight);
 
+// ── Wall sconce lights ──
+[{gx:2,gz:2},{gx:7,gz:2},{gx:2,gz:7},{gx:7,gz:7},{gx:1,gz:5},{gx:5,gz:1},{gx:8,gz:5}].forEach(function(c) {
+    var sc = new THREE.PointLight(0xff5500, 1.6, 9);
+    sc.position.set(c.gx*CELL+CELL/2, CELL*0.75, c.gz*CELL+CELL/2);
+    scene.add(sc);
+});
+
+// ── Procedural Textures ──
+function makeBrickTex() {
+    var cv = document.createElement("canvas"); cv.width = 128; cv.height = 128;
+    var ctx = cv.getContext("2d");
+    ctx.fillStyle = "#2e2828"; ctx.fillRect(0,0,128,128);
+    for (var i = 0; i < 5000; i++) {
+        var px = Math.random()*128, py = Math.random()*128;
+        var v = Math.floor(Math.random()*60-20);
+        var c = 58+v; ctx.fillStyle = "rgb("+c+","+(c-8)+","+(c-14)+")"; ctx.fillRect(px,py,Math.random()*3+1,Math.random()*2+1);
+    }
+    var bH=16, bW=32;
+    for (var row=0; row<8; row++) {
+        ctx.fillStyle="#0e0c0c"; ctx.fillRect(0,row*bH,128,2);
+        var off=(row%2)*(bW/2);
+        for (var bx=-bW+off; bx<128; bx+=bW) { ctx.fillStyle="#0e0c0c"; ctx.fillRect(bx,row*bH+2,2,bH-2); }
+    }
+    var t=new THREE.CanvasTexture(cv); t.wrapS=t.wrapT=THREE.RepeatWrapping; return t;
+}
+function makeFloorTex() {
+    var cv = document.createElement("canvas"); cv.width = 128; cv.height = 128;
+    var ctx = cv.getContext("2d");
+    ctx.fillStyle = "#171512"; ctx.fillRect(0,0,128,128);
+    for (var i = 0; i < 4000; i++) {
+        var px=Math.random()*128, py=Math.random()*128, v=Math.floor(Math.random()*40);
+        ctx.fillStyle="rgba(255,245,230,"+(v/255)+")"; ctx.fillRect(px,py,Math.random()*2+1,1);
+    }
+    ctx.strokeStyle="#090807"; ctx.lineWidth=2;
+    for (var tx=0; tx<128; tx+=32) { ctx.beginPath(); ctx.moveTo(tx,0); ctx.lineTo(tx,128); ctx.stroke(); }
+    for (var ty=0; ty<128; ty+=32) { ctx.beginPath(); ctx.moveTo(0,ty); ctx.lineTo(128,ty); ctx.stroke(); }
+    var t=new THREE.CanvasTexture(cv); t.wrapS=t.wrapT=THREE.RepeatWrapping; return t;
+}
+var brickTex = makeBrickTex();
+brickTex.repeat.set(1,1);
+var floorTex = makeFloorTex();
+floorTex.repeat.set(GRID*1.5, GRID*1.5);
+var ceilTex = makeBrickTex();
+ceilTex.repeat.set(GRID, GRID);
+
 // ── Materials ──
-var wallMat   = new THREE.MeshLambertMaterial({ color: 0x2244aa });
-var floorMat  = new THREE.MeshLambertMaterial({ color: 0x1a2a1a });
-var ceilMat   = new THREE.MeshLambertMaterial({ color: 0x0e0e1e });
-var enemyMat  = new THREE.MeshLambertMaterial({ color: 0xff3333, emissive: new THREE.Color(0x660000) });
-var itemMat   = new THREE.MeshLambertMaterial({ color: 0x44ff88, emissive: new THREE.Color(0x225533) });
-var remoteMat = new THREE.MeshLambertMaterial({ color: 0x3399ff, emissive: new THREE.Color(0x001144) });
+var wallMat   = new THREE.MeshStandardMaterial({ map: brickTex, roughness: 0.95, metalness: 0.0, color: 0xaa99cc });
+var floorMat  = new THREE.MeshStandardMaterial({ map: floorTex, roughness: 1.0,  metalness: 0.0, color: 0x445544 });
+var ceilMat   = new THREE.MeshStandardMaterial({ map: ceilTex,  roughness: 1.0,  metalness: 0.0, color: 0x222233 });
+var enemyMat  = new THREE.MeshStandardMaterial({ color: 0xcc2211, roughness: 0.6, metalness: 0.3, emissive: new THREE.Color(0x550000) });
+var itemMat   = new THREE.MeshStandardMaterial({ color: 0x44ff88, roughness: 0.2, metalness: 0.8, emissive: new THREE.Color(0x114422) });
+var remoteMat = new THREE.MeshStandardMaterial({ color: 0x3399ff, roughness: 0.6, metalness: 0.3, emissive: new THREE.Color(0x001144) });
 
 // ── Geometries ──
 var wallGeo   = new THREE.BoxGeometry(CELL, CELL, CELL);
 var floorGeo  = new THREE.PlaneGeometry(GRID * CELL, GRID * CELL);
-var enemyGeo  = new THREE.BoxGeometry(1.6, 1.6, 1.6);
-var itemGeo   = new THREE.OctahedronGeometry(0.65, 0);
+var enemyGeo  = new THREE.BoxGeometry(0.9, 2.2, 0.9);
+var itemGeo   = new THREE.OctahedronGeometry(0.55, 1);
 var remoteGeo = new THREE.BoxGeometry(0.9, 1.9, 0.9);
 
 // ── Build static dungeon ──
@@ -74,11 +128,13 @@ var remoteGeo = new THREE.BoxGeometry(0.9, 1.9, 0.9);
     var floor = new THREE.Mesh(floorGeo, floorMat);
     floor.rotation.x = -Math.PI / 2;
     floor.position.set(GRID * CELL / 2, 0, GRID * CELL / 2);
+    floor.receiveShadow = true;
     scene.add(floor);
 
     var ceil = new THREE.Mesh(floorGeo.clone(), ceilMat);
     ceil.rotation.x = Math.PI / 2;
     ceil.position.set(GRID * CELL / 2, CELL, GRID * CELL / 2);
+    ceil.receiveShadow = true;
     scene.add(ceil);
 
     for (var gz = 0; gz < GRID; gz++) {
@@ -86,6 +142,8 @@ var remoteGeo = new THREE.BoxGeometry(0.9, 1.9, 0.9);
             if (MAP[gz][gx] === 1) {
                 var w = new THREE.Mesh(wallGeo, wallMat);
                 w.position.set(gx * CELL + CELL / 2, CELL / 2, gz * CELL + CELL / 2);
+                w.castShadow = true;
+                w.receiveShadow = true;
                 scene.add(w);
             }
         }
@@ -119,6 +177,7 @@ function initGame(startX, startZ) {
     ENEMY_CELLS.forEach(function(pos) {
         var mesh = new THREE.Mesh(enemyGeo, enemyMat.clone());
         mesh.position.copy(cellCenter(pos.gx, pos.gz));
+        mesh.castShadow = true;
         mesh.add(new THREE.PointLight(0xff2200, 1.8, 8));
         scene.add(mesh);
         enemies.push({ mesh: mesh, gx: pos.gx, gz: pos.gz, alive: true });
@@ -171,6 +230,8 @@ document.addEventListener("keyup", function(e) { keys[e.key] = false; });
 var TURN_SPEED = 1.5, PLAYER_RADIUS = 0.9;
 var pointerLocked = false;
 const MOUSE_SENSITIVITY = 0.0022;
+var playerPitch = 0;
+var bobTime = 0;
 
 // ── Pointer Lock (Mouse Look) ──
 canvas.addEventListener("click", function() {
@@ -182,6 +243,7 @@ document.addEventListener("pointerlockchange", function() {
 document.addEventListener("mousemove", function(e) {
     if (pointerLocked && gameRunning && !gameOver && !won) {
         player.angle -= e.movementX * MOUSE_SENSITIVITY;
+        playerPitch = Math.max(-0.45, Math.min(0.45, playerPitch - e.movementY * MOUSE_SENSITIVITY));
     }
 });
 var lastTime = performance.now();
@@ -340,9 +402,18 @@ function animate(now) {
 
     if (items.every(function(i){ return i.collected; }) && enemies.every(function(e){ return !e.alive; })) won = true;
 
+    // ── Head bob ──
+    var isMoving = (keys["w"]||keys["W"]||keys["ArrowUp"]||keys["s"]||keys["S"]||keys["ArrowDown"]);
+    if (isMoving) bobTime += dt * (sprinting ? 9 : 6);
+    var bobY = isMoving ? Math.sin(bobTime) * 0.06 : Math.sin(bobTime) * 0.006;
+
+    // ── Torch flicker ──
+    torchLight.intensity = 3.5 + Math.sin(now * 0.009) * 0.5 + (Math.random() * 0.4 - 0.2);
+
     // ── Camera ──
-    camera.position.set(player.x, CELL * 0.55, player.z);
+    camera.position.set(player.x, CELL * 0.55 + bobY, player.z);
     camera.rotation.y = player.angle;
+    camera.rotation.x = playerPitch;
     torchLight.position.copy(camera.position);
 
     // ── Animate objects ──
