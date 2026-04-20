@@ -287,8 +287,8 @@ function animate(now) {
     var speed = sprinting ? SPRINT_SPEED : MOVE_SPEED;
     var sinA = Math.sin(player.angle), cosA = Math.cos(player.angle);
     var nx = player.x, nz = player.z;
-    if (keys["ArrowUp"]   || keys["w"] || keys["W"]) { nx += sinA * speed * dt; nz += cosA * speed * dt; }
-    if (keys["ArrowDown"] || keys["s"] || keys["S"]) { nx -= sinA * speed * dt; nz -= cosA * speed * dt; }
+    if (keys["ArrowUp"]   || keys["w"] || keys["W"]) { nx -= sinA * speed * dt; nz -= cosA * speed * dt; }
+    if (keys["ArrowDown"] || keys["s"] || keys["S"]) { nx += sinA * speed * dt; nz += cosA * speed * dt; }
 
     var r = PLAYER_RADIUS;
     var gzc = Math.floor(player.z / CELL);
