@@ -609,9 +609,144 @@ var ITEM_CELLS  = [
     {gx:8,gz:13},{gx:10,gz:7}
 ];
 
+// ── Cobwebs ──
+(function() {
+    var cwMat = new THREE.MeshBasicMaterial({ color: 0xbbbbcc, transparent: true, opacity: 0.32, side: THREE.DoubleSide });
+    [[1,1],[14,1],[1,14],[14,14],[4,4],[11,11],[3,8],[8,14],[13,5],[6,11]].forEach(function(c) {
+        if (MAP[c[1]] && MAP[c[1]][c[0]] === 0) {
+            var geo = new THREE.PlaneGeometry(1.1, 1.1);
+            var m1 = new THREE.Mesh(geo, cwMat); m1.position.set(c[0]*CELL+CELL/2, CELL-0.05, c[1]*CELL+CELL/2); m1.rotation.x = Math.PI/2; scene.add(m1);
+        }
+    });
+})();
+
+// ── Spark particle system (one pool per sconce) ──
+var sparkParticles = [];
+(function() {
+    SCONCE_DEFS.forEach(function(c) {
+        var pts = [];
+        for (var i = 0; i < 6; i++) {
+            pts.push({ x: c.gx*CELL+CELL/2, y: CELL*0.85, z: c.gz*CELL+CELL/2, vx: 0, vy: 0, vz: 0, life: 0, maxLife: 0 });
+        }
+        sparkParticles.push({ pos: { x: c.gx*CELL+CELL/2, y: CELL*0.85, z: c.gz*CELL+CELL/2 }, pts: pts, timer: 0 });
+    });
+})();
+var sparkGeo = new THREE.SphereGeometry(0.025, 3, 3);
+var sparkMat = new THREE.MeshBasicMaterial({ color: 0xffcc44 });
+var sparkMeshPool = [];
+for (var si2 = 0; si2 < 90; si2++) {
+    var sm = new THREE.Mesh(sparkGeo, sparkMat.clone());
+    sm.visible = false;
+    scene.add(sm);
+    sparkMeshPool.push({ mesh: sm, life: 0, maxLife: 0, vx: 0, vy: 0, vz: 0 });
+}
+var sparkPoolIdx = 0;
+function spawnSpark(x, y, z) {
+    var sp = sparkMeshPool[sparkPoolIdx % sparkMeshPool.length];
+    sparkPoolIdx++;
+    sp.mesh.position.set(x, y, z);
+    sp.mesh.visible = true;
+    sp.life = 0;
+    sp.maxLife = 0.3 + Math.random() * 0.3;
+    sp.vx = (Math.random()-0.5) * 1.2;
+    sp.vy = 0.8 + Math.random() * 1.4;
+    sp.vz = (Math.random()-0.5) * 1.2;
+}
+
 // ── Game state ──
 var enemies = [], items = [], player = {}, gameOver = false, won = false, gameRunning = false;
+var paused = false;
 var dmgFlashEl = document.getElementById("dmg-flash");
+var floatNumsEl = document.getElementById("float-numbers");
+var pauseMenuEl = document.getElementById("pause-menu");
+var fpsCounterEl = document.getElementById("fps-counter");
+
+// ── FPS tracking ──
+var fpsFrames = 0, fpsAccum = 0, fpsDisplay = 60;
+
+// ── Floating damage numbers ──
+function spawnFloatNum(text, color, screenX, screenY) {
+    if (!floatNumsEl) return;
+    var el = document.createElement("div");
+    el.className = "float-num";
+    el.textContent = text;
+    el.style.color = color;
+    el.style.left = screenX + "px";
+    el.style.top  = screenY + "px";
+    floatNumsEl.appendChild(el);
+    setTimeout(function() { if (el.parentNode) el.parentNode.removeChild(el); }, 900);
+}
+function worldToScreen(wx, wy, wz) {
+    var v = new THREE.Vector3(wx, wy, wz);
+    v.project(camera);
+    return {
+        x: (v.x * 0.5 + 0.5) * window.innerWidth,
+        y: (-v.y * 0.5 + 0.5) * window.innerHeight
+    };
+}
+
+// ── Loot drops (health potion = red, speed boost = blue) ──
+var lootDrops = [];
+var lootGeoHP   = new THREE.SphereGeometry(0.22, 7, 7);
+var lootMatHP   = new THREE.MeshStandardMaterial({ color: 0xff2244, emissive: new THREE.Color(0x440011), roughness: 0.4, metalness: 0.5 });
+var lootGeoSP   = new THREE.SphereGeometry(0.22, 7, 7);
+var lootMatSP   = new THREE.MeshStandardMaterial({ color: 0x22aaff, emissive: new THREE.Color(0x001144), roughness: 0.4, metalness: 0.5 });
+function spawnLoot(x, z) {
+    var isHP = Math.random() < 0.6;
+    var geo = isHP ? lootGeoHP : lootGeoSP;
+    var mat = (isHP ? lootMatHP : lootMatSP).clone();
+    var mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(x + (Math.random()-0.5)*0.5, 0.3, z + (Math.random()-0.5)*0.5);
+    var light = new THREE.PointLight(isHP ? 0xff2244 : 0x22aaff, 1.2, 4);
+    mesh.add(light);
+    scene.add(mesh);
+    lootDrops.push({ mesh: mesh, type: isHP ? "hp" : "speed", collected: false });
+}
+
+// ── Jump / crouch / dodge ──
+var playerVY = 0, playerY = 0;
+var GRAVITY = 18;
+var crouching = false;
+var dodgeVX = 0, dodgeVZ = 0, dodgeCooldown = 0;
+
+// ── Pause ──
+window.resumeGame = function() {
+    paused = false;
+    pauseMenuEl.classList.remove("active");
+    canvas.requestPointerLock();
+};
+window.quitToLobby = function() {
+    paused = false;
+    pauseMenuEl.classList.remove("active");
+    gameRunning = false;
+    gameOver = false; won = false;
+    lobbyEl.style.display = "flex";
+    document.exitPointerLock();
+};
+
+// ── Heartbeat oscillator (Web Audio) ──
+var audioCtx = null;
+function getAudioCtx() { if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){} } return audioCtx; }
+var heartbeatPlaying = false, heartbeatOsc = null;
+function startHeartbeat() {
+    if (heartbeatPlaying) return;
+    var ctx = getAudioCtx(); if (!ctx) return;
+    heartbeatPlaying = true;
+    function beat() {
+        if (!heartbeatPlaying) return;
+        var o = ctx.createOscillator();
+        var g = ctx.createGain();
+        o.type = "sine"; o.frequency.value = 55;
+        g.gain.setValueAtTime(0, ctx.currentTime);
+        g.gain.linearRampToValueAtTime(0.18, ctx.currentTime + 0.04);
+        g.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.18);
+        o.connect(g); g.connect(ctx.destination);
+        o.start(ctx.currentTime); o.stop(ctx.currentTime + 0.2);
+        setTimeout(beat, 700);
+    }
+    beat();
+}
+function stopHeartbeat() { heartbeatPlaying = false; }
 
 // ── Blood splats ──
 var bloodSplats = [];
@@ -641,6 +776,15 @@ function clearAllKeys() {
 document.addEventListener("keydown", function(e) {
     keyDownAt[e.code] = performance.now();
     if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Space"].indexOf(e.code) >= 0) e.preventDefault();
+    // Pause toggle
+    if (e.code === "Escape" && gameRunning && !gameOver && !won) {
+        if (!paused) {
+            paused = true;
+            pauseMenuEl.classList.add("active");
+            document.exitPointerLock();
+            clearAllKeys();
+        }
+    }
 });
 document.addEventListener("keyup", function(e) {
     delete keyDownAt[e.code];
@@ -688,6 +832,9 @@ function initGame(startX, startZ) {
     var sx = startX !== undefined ? startX : cellCenter(1, 1).x;
     var sz = startZ !== undefined ? startZ : cellCenter(1, 1).z;
     player = { x: sx, z: sz, angle: 0, hp: 5, score: 0, invincible: 0, kills: 0, gameStartTime: performance.now() };
+    lootDrops.forEach(function(l) { scene.remove(l.mesh); });
+    lootDrops = [];
+    playerVY = 0; playerY = 0; crouching = false; dodgeCooldown = 0;
     bloodSplats.forEach(function(s) { scene.remove(s); });
     bloodSplats = [];
 
@@ -834,8 +981,13 @@ function animate(now) {
     var dt = Math.min((now - lastTime) / 1000, 0.05);
     lastTime = now;
 
+    // FPS
+    fpsFrames++; fpsAccum += dt;
+    if (fpsAccum >= 0.5) { fpsDisplay = Math.round(fpsFrames / fpsAccum); fpsFrames = 0; fpsAccum = 0; }
+    if (fpsCounterEl) fpsCounterEl.textContent = fpsDisplay + " fps";
+
     renderer.render(scene, camera);
-    if (!gameRunning) return;
+    if (!gameRunning || paused) return;
 
     if (isKeyDown("KeyR")) {
         delete keyDownAt["KeyR"];
@@ -855,6 +1007,13 @@ function animate(now) {
             var adist = Math.sqrt(adx*adx + adz*adz);
             if (adist < ATTACK_RANGE) {
                 en.hp--;
+                // Enemy hurt flash
+                en.mesh.children.forEach(function(ch) {
+                    if (ch.material) { var oc = ch.material.color.clone(); ch.material.emissive && ch.material.emissive.set(0xff0000); setTimeout(function(){ ch.material.emissive && ch.material.emissive.set(0x550000); }, 120); }
+                });
+                // Floating damage number
+                var sc = worldToScreen(en.x, CELL*0.8, en.z);
+                spawnFloatNum("-1", "#ff4444", sc.x + (Math.random()-0.5)*30, sc.y - 20);
                 // Knockback
                 if (adist > 0.01) { en.x += (adx/adist)*0.9; en.z += (adz/adist)*0.9; }
                 if (en.hp <= 0) {
@@ -864,6 +1023,8 @@ function animate(now) {
                     addBloodSplat(en.x, en.z);
                     player.kills++;
                     player.score++;
+                    // Loot drop (60% chance)
+                    if (Math.random() < 0.6) spawnLoot(en.x, en.z);
                     if (conn && conn.open) conn.send(JSON.stringify({ type: "enemyKill", idx: eidx }));
                 }
             }
@@ -879,6 +1040,34 @@ function animate(now) {
                 }, 400);
             }, 130);
         }
+    }
+
+    // ── Crouch (Ctrl) ──
+    crouching = isKeyDown("ControlLeft") || isKeyDown("ControlRight");
+
+    // ── Jump + Gravity ──
+    var onGround = playerY <= 0.001;
+    if (onGround && isKeyDown("Space")) {
+        playerVY = 7.5;
+        delete keyDownAt["Space"];
+    }
+    playerVY -= GRAVITY * dt;
+    playerY = Math.max(0, playerY + playerVY * dt);
+    if (playerY <= 0) { playerY = 0; playerVY = 0; }
+
+    // ── Dodge roll (Space mid-air OR double-tap) ──
+    if (dodgeCooldown > 0) dodgeCooldown -= dt;
+    var dodgeLen = Math.sqrt(dodgeVX*dodgeVX + dodgeVZ*dodgeVZ);
+    if (dodgeLen > 0.01) {
+        var dnx = player.x + dodgeVX * dt;
+        var dnz = player.z + dodgeVZ * dt;
+        var dgzc = Math.floor(player.z / CELL);
+        if (!isWall(Math.floor((dnx-PLAYER_RADIUS)/CELL), dgzc) && !isWall(Math.floor((dnx+PLAYER_RADIUS)/CELL), dgzc)) player.x = dnx;
+        var dgxc = Math.floor(player.x / CELL);
+        if (!isWall(dgxc, Math.floor((dnz-PLAYER_RADIUS)/CELL)) && !isWall(dgxc, Math.floor((dnz+PLAYER_RADIUS)/CELL))) player.z = dnz;
+        dodgeVX *= (1 - dt * 8);
+        dodgeVZ *= (1 - dt * 8);
+        if (dodgeLen < 0.1) { dodgeVX = 0; dodgeVZ = 0; }
     }
 
     // ── Turning (only when pointer NOT locked — otherwise A/D strafe) ──
@@ -898,7 +1087,7 @@ function animate(now) {
     sprintFill.style.background = sprinting ? "#ff5555" : (stamina < 30 ? "#ffb86c" : "#50fa7b");
 
     // ── Movement (normalized so diagonal isn't faster) ──
-    var speed = sprinting ? SPRINT_SPEED : MOVE_SPEED;
+    var speed = (sprinting ? SPRINT_SPEED : MOVE_SPEED) + (player.speedBoost || 0);
     var sinA = Math.sin(player.angle), cosA = Math.cos(player.angle);
     var moveX = 0, moveZ = 0;
     var fwd     = (isKeyDown("ArrowUp")    || isKeyDown("KeyW")) ? 1 : 0;
@@ -959,7 +1148,28 @@ function animate(now) {
         }
     });
 
-    if (items.every(function(i){ return i.collected; }) && enemies.every(function(e){ return !e.alive; })) won = true;
+    // ── Loot pickup (auto when near) ──
+    lootDrops.forEach(function(l) {
+        if (l.collected) return;
+        var lp = l.mesh.position;
+        if (Math.hypot(player.x - lp.x, player.z - lp.z) < 1.2) {
+            l.collected = true;
+            scene.remove(l.mesh);
+            var sc2 = worldToScreen(lp.x, lp.y + 0.5, lp.z);
+            if (l.type === "hp") {
+                player.hp = Math.min(5, player.hp + 1);
+                spawnFloatNum("+1 HP", "#ff4488", sc2.x, sc2.y);
+            } else {
+                player.speedBoost = (player.speedBoost || 0) + 4.0;
+                spawnFloatNum("+SPEED", "#22aaff", sc2.x, sc2.y);
+            }
+        }
+    });
+
+    // ── Speed boost decay ──
+    if (player.speedBoost > 0) player.speedBoost = Math.max(0, player.speedBoost - dt * 0.6);
+
+    if (items.every(function(i){ return i.collected; }) && enemies.every(function(e){ return !e.alive && !e.dying; })) won = true;
 
     // ── Update shader uniforms ──
     if (wallMat.uniforms) wallMat.uniforms.time.value = now / 1000.0;
@@ -1001,11 +1211,26 @@ function animate(now) {
     // ── Invincibility camera shake ──
     var shakeX = player.invincible > 0 ? (Math.random()-0.5)*0.04 : 0;
     var shakeY = player.invincible > 0 ? (Math.random()-0.5)*0.03 : 0;
-    // ── Camera ──
-    camera.position.set(player.x + shakeX, CELL * 0.55 + bobY + idleBreath + shakeY, player.z);
+    // ── Camera (includes jump offset + crouch) ──
+    var camHeight = crouching ? CELL * 0.32 : CELL * 0.55;
+    camera.position.set(player.x + shakeX, camHeight + bobY + idleBreath + shakeY + playerY, player.z);
     camera.rotation.y = player.angle;
     camera.rotation.x = playerPitch;
     torchLight.position.copy(camera.position);
+
+    // ── Low HP effects: heartbeat + pulse vignette ──
+    if (player.hp <= 1 && !gameOver) {
+        startHeartbeat();
+        var vigEl = document.getElementById("vignette");
+        if (vigEl) {
+            var pulse = 0.74 + Math.sin(t * 3.8) * 0.22;
+            vigEl.style.background = "radial-gradient(ellipse at center, transparent 30%, rgba(" + Math.round(160*pulse) + ",0,0," + (0.55 + Math.sin(t*3.8)*0.2) + ") 100%)";
+        }
+    } else {
+        stopHeartbeat();
+        var vigEl2 = document.getElementById("vignette");
+        if (vigEl2 && player.hp > 1) vigEl2.style.background = "radial-gradient(ellipse at center, transparent 38%, rgba(0,0,0,0.74) 100%)";
+    }
 
     // ── Health bar ──
     var healthFillEl = document.getElementById("health-fill");
@@ -1049,6 +1274,43 @@ function animate(now) {
         mmCtx.lineTo(ppx2 - Math.sin(player.angle)*7, ppz2 - Math.cos(player.angle)*7);
         mmCtx.stroke();
     }
+
+    // ── Loot animation ──
+    lootDrops.forEach(function(l, li) {
+        if (!l.collected) {
+            l.mesh.position.y = 0.3 + Math.sin(t * 3 + li * 1.3) * 0.12;
+            l.mesh.rotation.y = t * 2.5;
+        }
+    });
+
+    // ── Spark particles ──
+    sparkParticles.forEach(function(sp) {
+        sp.timer -= dt;
+        if (sp.timer <= 0) {
+            sp.timer = 0.06 + Math.random() * 0.12;
+            spawnSpark(sp.pos.x + (Math.random()-0.5)*0.12, sp.pos.y, sp.pos.z + (Math.random()-0.5)*0.12);
+        }
+    });
+    sparkMeshPool.forEach(function(sp) {
+        if (!sp.mesh.visible) return;
+        sp.life += dt;
+        if (sp.life >= sp.maxLife) { sp.mesh.visible = false; return; }
+        sp.vy -= 4 * dt;
+        sp.mesh.position.x += sp.vx * dt;
+        sp.mesh.position.y += sp.vy * dt;
+        sp.mesh.position.z += sp.vz * dt;
+        var fade = 1 - sp.life / sp.maxLife;
+        sp.mesh.material.opacity = fade;
+        sp.mesh.material.transparent = true;
+        sp.mesh.material.color.setHSL(0.10 + fade * 0.05, 1.0, 0.5 + fade * 0.2);
+    });
+
+    // ── Film grain overlay (canvas overlay each frame) ──
+    var grainCv = document.getElementById("minimap-canvas"); // separate from minimap, use renderer domElement trick
+    // Apply via CSS filter flicker on canvas for lightweight grain
+    var grainAmt = 0.015 + Math.random() * 0.012;
+    // Use CSS hue-rotate flicker at very small amounts as grain proxy
+    renderer.domElement.style.filter = "contrast(1.04) saturate(1.08)";
 
     // ── Animate objects ──
     var t = now / 1000;

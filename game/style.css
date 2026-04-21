@@ -218,3 +218,30 @@ body {
 
 /* ── VIGNETTE ── */
 #vignette { position: fixed; inset: 0; pointer-events: none; background: radial-gradient(ellipse at center, transparent 38%, rgba(0,0,0,0.74) 100%); z-index: 5; }
+
+/* ── FLOATING DAMAGE NUMBERS ── */
+#float-numbers { position: fixed; inset: 0; pointer-events: none; z-index: 20; }
+.float-num {
+    position: absolute; font-family: "Courier New", monospace; font-weight: bold;
+    font-size: 1.1rem; text-shadow: 0 0 6px #000; pointer-events: none;
+    animation: floatUp 0.85s ease-out forwards;
+}
+@keyframes floatUp { 0%{opacity:1;transform:translateY(0) scale(1);} 100%{opacity:0;transform:translateY(-54px) scale(0.7);} }
+
+/* ── FPS COUNTER ── */
+#fps-counter { position: fixed; top: 16px; left: 16px; color: rgba(255,255,255,0.35); font-size: 0.72rem; font-family: monospace; pointer-events: none; z-index: 20; }
+
+/* ── PAUSE MENU ── */
+#pause-menu {
+    display: none; position: fixed; inset: 0; z-index: 200;
+    background: rgba(0,0,0,0.75); backdrop-filter: blur(6px);
+    flex-direction: column; align-items: center; justify-content: center; gap: 18px;
+}
+#pause-menu.active { display: flex; }
+#pause-menu h2 { color: #ffb86c; font-size: 2.4rem; letter-spacing: 6px; text-shadow: 0 0 20px #ff5500aa; }
+#pause-menu button {
+    background: #282a36; color: #f8f8f2; border: 2px solid #6272a4;
+    padding: 11px 36px; border-radius: 8px; font-size: 1rem; cursor: pointer;
+    font-family: "Courier New", monospace; letter-spacing: 1px; transition: all 0.15s;
+}
+#pause-menu button:hover { background: #44475a; border-color: #bd93f9; color: #bd93f9; }
