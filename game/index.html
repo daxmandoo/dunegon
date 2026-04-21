@@ -28,13 +28,19 @@
     <div id="hud">
         <div id="status"></div>
         <div id="crosshair">+</div>
+        <canvas id="minimap-canvas" width="160" height="160"></canvas>
+        <div id="health-bar-wrap">
+            <div id="health-label">HP</div>
+            <div id="health-bar"><div id="health-fill"></div></div>
+        </div>
         <div id="sprint-bar-wrap">
             <div id="sprint-label">SPRINT</div>
             <div id="sprint-bar"><div id="sprint-fill"></div></div>
         </div>
-        <div id="controls">W/S: Move &nbsp;|&nbsp; A/D: Strafe &nbsp;|&nbsp; Mouse: Look &nbsp;|&nbsp; SHIFT: Sprint &nbsp;|&nbsp; R: Restart &nbsp;|&nbsp; ESC: Unlock Mouse</div>
+        <div id="controls">W/S: Move &nbsp;|&nbsp; A/D: Strafe &nbsp;|&nbsp; Mouse: Look &nbsp;|&nbsp; SHIFT: Sprint &nbsp;|&nbsp; E: Attack &nbsp;|&nbsp; R: Restart &nbsp;|&nbsp; ESC: Unlock</div>
     </div>
 
+    <div id="vignette"></div>
     <canvas id="dungeon-canvas"></canvas>
     <div id="dmg-flash"></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>

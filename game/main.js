@@ -70,15 +70,31 @@ torchLight.shadow.camera.near = 0.2;
 torchLight.shadow.camera.far = 14;
 scene.add(torchLight);
 
-// ── Wall sconce lights ──
-[{gx:1,gz:2},{gx:7,gz:2},{gx:14,gz:2},
+// ── Wall sconce lights + animated flame meshes ──
+var sconceLights = [], sconceFlames = [];
+var SCONCE_DEFS = [{gx:1,gz:2},{gx:7,gz:2},{gx:14,gz:2},
  {gx:2,gz:7},{gx:7,gz:7},{gx:12,gz:7},
  {gx:2,gz:12},{gx:7,gz:12},{gx:14,gz:12},
  {gx:5,gz:5},{gx:10,gz:10},{gx:13,gz:9},
- {gx:3,gz:14},{gx:9,gz:4},{gx:11,gz:13}].forEach(function(c) {
+ {gx:3,gz:14},{gx:9,gz:4},{gx:11,gz:13}];
+SCONCE_DEFS.forEach(function(c) {
     var sc = new THREE.PointLight(0xff5500, 1.8, 11);
     sc.position.set(c.gx*CELL+CELL/2, CELL*0.75, c.gz*CELL+CELL/2);
     scene.add(sc);
+    sconceLights.push(sc);
+    // Flame cone
+    var fGeo = new THREE.ConeGeometry(0.10, 0.26, 6);
+    var fMat = new THREE.MeshBasicMaterial({ color: 0xff6600 });
+    var flame = new THREE.Mesh(fGeo, fMat);
+    flame.position.set(c.gx*CELL+CELL/2, CELL*0.80, c.gz*CELL+CELL/2);
+    scene.add(flame);
+    // Bright core
+    var cGeo = new THREE.SphereGeometry(0.065, 5, 5);
+    var cMat = new THREE.MeshBasicMaterial({ color: 0xffee66 });
+    var core = new THREE.Mesh(cGeo, cMat);
+    core.position.set(c.gx*CELL+CELL/2, CELL*0.86, c.gz*CELL+CELL/2);
+    scene.add(core);
+    sconceFlames.push({ flame: flame, core: core, baseY: CELL*0.80 });
 });
 
 // ── Procedural Textures ──
@@ -417,6 +433,50 @@ var remoteGeo = new THREE.BoxGeometry(0.9, 1.9, 0.9);
         scene.add(pm);
     });
 
+    // ── Stalactites ──
+    var stalaGeo = new THREE.ConeGeometry(0.09, 0.55, 6);
+    var stalaMat = new THREE.MeshStandardMaterial({ color: 0x2a2030, roughness: 1.0 });
+    [{gx:5,gz:1},{gx:8,gz:1},{gx:12,gz:1},{gx:5,gz:3},{gx:8,gz:3},
+     {gx:3,gz:4},{gx:9,gz:4},{gx:4,gz:6},{gx:7,gz:6},{gx:11,gz:6},
+     {gx:5,gz:8},{gx:8,gz:9},{gx:4,gz:11},{gx:7,gz:12},{gx:9,gz:13},
+     {gx:10,gz:14},{gx:13,gz:14},{gx:1,gz:8},{gx:13,gz:11},{gx:6,gz:14}
+    ].forEach(function(s) {
+        if (MAP[s.gz] && MAP[s.gz][s.gx] === 0) {
+            var stMesh = new THREE.Mesh(stalaGeo, stalaMat);
+            stMesh.rotation.z = Math.PI;
+            stMesh.position.set(
+                s.gx*CELL+CELL/2 + (Math.random()-0.5)*1.0,
+                CELL - 0.28 + Math.random()*0.08,
+                s.gz*CELL+CELL/2 + (Math.random()-0.5)*1.0
+            );
+            scene.add(stMesh);
+        }
+    });
+
+    // ── Barrels ──
+    var brlGeo    = new THREE.CylinderGeometry(0.27, 0.30, 0.65, 8);
+    var brlMat    = new THREE.MeshStandardMaterial({ color: 0x4a3010, roughness: 0.9, metalness: 0.1 });
+    var brlCapGeo = new THREE.CylinderGeometry(0.30, 0.30, 0.04, 8);
+    var brlCapMat = new THREE.MeshStandardMaterial({ color: 0x3a2508, roughness: 1.0 });
+    [{gx:4,gz:2},{gx:6,gz:6},{gx:9,gz:5},{gx:2,gz:9},
+     {gx:11,gz:6},{gx:3,gz:13},{gx:11,gz:11},{gx:6,gz:14}
+    ].forEach(function(b) {
+        if (MAP[b.gz] && MAP[b.gz][b.gx] === 0) {
+            var brl = new THREE.Mesh(brlGeo, brlMat.clone());
+            brl.position.set(
+                b.gx*CELL+CELL/2 + (Math.random()-0.5)*0.6,
+                0.33,
+                b.gz*CELL+CELL/2 + (Math.random()-0.5)*0.6
+            );
+            brl.rotation.y = Math.random()*Math.PI;
+            brl.castShadow = true;
+            scene.add(brl);
+            var cap = new THREE.Mesh(brlCapGeo, brlCapMat);
+            cap.position.set(brl.position.x, 0.66, brl.position.z);
+            scene.add(cap);
+        }
+    });
+
     for (var gz = 0; gz < GRID; gz++) {
         for (var gx = 0; gx < GRID; gx++) {
             if (MAP[gz][gx] === 1) {
@@ -553,6 +613,18 @@ var ITEM_CELLS  = [
 var enemies = [], items = [], player = {}, gameOver = false, won = false, gameRunning = false;
 var dmgFlashEl = document.getElementById("dmg-flash");
 
+// ── Blood splats ──
+var bloodSplats = [];
+function addBloodSplat(x, z) {
+    var geo = new THREE.CircleGeometry(0.35 + Math.random()*0.45, 7);
+    var mat = new THREE.MeshBasicMaterial({ color: 0x7a0000, transparent: true, opacity: 0.82, depthWrite: false });
+    var mesh = new THREE.Mesh(geo, mat);
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.set(x + (Math.random()-0.5)*0.4, 0.02, z + (Math.random()-0.5)*0.4);
+    scene.add(mesh);
+    bloodSplats.push(mesh);
+}
+
 // ── Sticky-key-proof input system ──
 // Track keys by e.code + timestamp; auto-expire after 2s if keyup missed
 var keyDownAt = Object.create(null);
@@ -602,7 +674,7 @@ function initGame(startX, startZ) {
         mesh.position.copy(cc);
         mesh.add(new THREE.PointLight(0xff2200, 1.8, 8));
         scene.add(mesh);
-        enemies.push({ mesh: mesh, gx: pos.gx, gz: pos.gz, x: cc.x, z: cc.z, alive: true });
+        enemies.push({ mesh: mesh, gx: pos.gx, gz: pos.gz, x: cc.x, z: cc.z, alive: true, hp: 3, dying: false, dyingTimer: 0 });
     });
 
     ITEM_CELLS.forEach(function(pos) {
@@ -615,7 +687,9 @@ function initGame(startX, startZ) {
 
     var sx = startX !== undefined ? startX : cellCenter(1, 1).x;
     var sz = startZ !== undefined ? startZ : cellCenter(1, 1).z;
-    player = { x: sx, z: sz, angle: 0, hp: 5, score: 0, invincible: 0 };
+    player = { x: sx, z: sz, angle: 0, hp: 5, score: 0, invincible: 0, kills: 0, gameStartTime: performance.now() };
+    bloodSplats.forEach(function(s) { scene.remove(s); });
+    bloodSplats = [];
 
     gameRunning = true;
     lobbyEl.style.display = "none";
@@ -625,12 +699,19 @@ function initGame(startX, startZ) {
 function updateStatus() {
     if (!gameRunning) return;
     if (gameOver) {
-        statusEl.textContent = "GAME OVER!  Press R to restart.";
+        var hsG = parseInt(localStorage.getItem("dunegon_hs") || "0");
+        var finalG = player.score * 100 + player.kills * 50;
+        if (finalG > hsG) localStorage.setItem("dunegon_hs", finalG);
+        statusEl.innerHTML = "GAME OVER! &nbsp; Score: " + finalG + " &nbsp; Kills: " + player.kills + "<br><small style='font-size:0.75em;opacity:0.7'>Best: " + Math.max(hsG, finalG) + " &nbsp;&nbsp; Press R to restart</small>";
         statusEl.style.color = "#ff5555";
         return;
     }
     if (won) {
-        statusEl.textContent = "YOU WIN!  Score: " + player.score + "   Press R to play again.";
+        var elapsed = Math.round((performance.now() - player.gameStartTime) / 1000);
+        var finalW = player.score * 100 + player.kills * 50 + Math.max(0, 600 - elapsed) * 5;
+        var hsW = parseInt(localStorage.getItem("dunegon_hs") || "0");
+        if (finalW > hsW) localStorage.setItem("dunegon_hs", finalW);
+        statusEl.innerHTML = "YOU WIN! &nbsp; Score: " + finalW + " &nbsp; Time: " + elapsed + "s<br><small style='font-size:0.75em;opacity:0.7'>Best: " + Math.max(hsW, finalW) + " &nbsp;&nbsp; Press R to play again</small>";
         statusEl.style.color = "#ffb86c";
         return;
     }
@@ -640,7 +721,7 @@ function updateStatus() {
     for (i = player.hp; i < 5; i++) h += "\u2661";
     var gl = items.filter(function(it) { return !it.collected; }).length;
     var el = enemies.filter(function(e) { return e.alive; }).length;
-    statusEl.textContent = "HP: " + h + "   Score: " + player.score + "   Gems: " + gl + "   Enemies: " + el;
+    statusEl.textContent = "HP: " + h + "   Score: " + player.score + "   Kills: " + player.kills + "   Gems: " + gl + "   Enemies: " + el;
 }
 
 document.addEventListener("pointerlockchange", function() {
@@ -764,6 +845,42 @@ function animate(now) {
 
     if (gameOver || won) return;
 
+    // ── Melee attack (E key) ──
+    if (isKeyDown("KeyE")) {
+        delete keyDownAt["KeyE"];
+        var ATTACK_RANGE = 2.5;
+        enemies.forEach(function(en, eidx) {
+            if (!en.alive || en.dying) return;
+            var adx = en.x - player.x, adz = en.z - player.z;
+            var adist = Math.sqrt(adx*adx + adz*adz);
+            if (adist < ATTACK_RANGE) {
+                en.hp--;
+                // Knockback
+                if (adist > 0.01) { en.x += (adx/adist)*0.9; en.z += (adz/adist)*0.9; }
+                if (en.hp <= 0) {
+                    en.alive = false;
+                    en.dying = true;
+                    en.dyingTimer = 0;
+                    addBloodSplat(en.x, en.z);
+                    player.kills++;
+                    player.score++;
+                    if (conn && conn.open) conn.send(JSON.stringify({ type: "enemyKill", idx: eidx }));
+                }
+            }
+        });
+        // Brief yellow attack flash
+        if (dmgFlashEl) {
+            dmgFlashEl.style.background = "radial-gradient(ellipse at center, rgba(255,220,50,0.15) 30%, rgba(255,120,0,0.30) 100%)";
+            dmgFlashEl.style.opacity = "0.45";
+            setTimeout(function() {
+                dmgFlashEl.style.opacity = "0";
+                setTimeout(function() {
+                    dmgFlashEl.style.background = "radial-gradient(ellipse at center, rgba(255,0,0,0.0) 30%, rgba(200,0,0,0.85) 100%)";
+                }, 400);
+            }, 130);
+        }
+    }
+
     // ── Turning (only when pointer NOT locked — otherwise A/D strafe) ──
     if (!pointerLocked) {
         if (isKeyDown("ArrowLeft")  || isKeyDown("KeyA")) player.angle += TURN_SPEED * dt;
@@ -860,26 +977,93 @@ function animate(now) {
         ? "inset 0 0 60px 30px rgba(255,80,0,0.45)"
         : "inset 0 0 40px 10px rgba(0,0,0,0.6)";
 
-    // ── Head bob ──
+    // ── Head bob + idle breathing ──
     var isMoving = isKeyDown("KeyW") || isKeyDown("ArrowUp") || isKeyDown("KeyS") || isKeyDown("ArrowDown");
     if (isMoving) bobTime += dt * (sprinting ? 9 : 6);
-    var bobY = isMoving ? Math.sin(bobTime) * 0.06 : Math.sin(bobTime) * 0.006;
+    var bobY = isMoving ? Math.sin(bobTime) * 0.06 : 0;
+    var idleBreath = !isMoving ? Math.sin(t * 0.72) * 0.018 : 0;
 
-    // ── Torch flicker ──
+    // ── Main torch flicker ──
     torchLight.intensity = 3.5 + Math.sin(now * 0.009) * 0.5 + (Math.random() * 0.4 - 0.2);
+
+    // ── Per-sconce flicker + flame animation ──
+    sconceLights.forEach(function(sc, si) {
+        sc.intensity = 1.6 + Math.sin(now * 0.007 + si * 2.31) * 0.35 + (Math.random() * 0.18 - 0.09);
+    });
+    sconceFlames.forEach(function(sf, si) {
+        var flk = Math.sin(now * 0.013 + si * 1.73) * 0.038 + Math.random() * 0.022;
+        sf.flame.position.y = sf.baseY + flk;
+        sf.flame.scale.set(1 + flk*2.4, 1 + flk*1.7, 1 + flk*2.4);
+        sf.core.position.y = sf.baseY + 0.06 + flk;
+        sf.flame.material.color.setHSL(0.08 + flk * 0.22, 1.0, 0.50 + flk * 0.8);
+    });
 
     // ── Invincibility camera shake ──
     var shakeX = player.invincible > 0 ? (Math.random()-0.5)*0.04 : 0;
     var shakeY = player.invincible > 0 ? (Math.random()-0.5)*0.03 : 0;
     // ── Camera ──
-    camera.position.set(player.x + shakeX, CELL * 0.55 + bobY + shakeY, player.z);
+    camera.position.set(player.x + shakeX, CELL * 0.55 + bobY + idleBreath + shakeY, player.z);
     camera.rotation.y = player.angle;
     camera.rotation.x = playerPitch;
     torchLight.position.copy(camera.position);
 
+    // ── Health bar ──
+    var healthFillEl = document.getElementById("health-fill");
+    if (healthFillEl) {
+        healthFillEl.style.width = (player.hp / 5 * 100) + "%";
+        healthFillEl.style.background = player.hp <= 1 ? "#ff5555" : player.hp <= 2 ? "#ffb86c" : "#50fa7b";
+    }
+
+    // ── Minimap ──
+    var mmCv = document.getElementById("minimap-canvas");
+    if (mmCv) {
+        var mmCtx = mmCv.getContext("2d");
+        var mmS = 160, cS = mmS / GRID;
+        mmCtx.fillStyle = "#000000";
+        mmCtx.fillRect(0, 0, mmS, mmS);
+        for (var mz = 0; mz < GRID; mz++) {
+            for (var mmx = 0; mmx < GRID; mmx++) {
+                mmCtx.fillStyle = MAP[mz][mmx] === 1 ? "#3a2212" : "#0e0b09";
+                mmCtx.fillRect(mmx*cS+0.5, mz*cS+0.5, cS-1, cS-1);
+            }
+        }
+        items.forEach(function(it) {
+            if (!it.collected) {
+                mmCtx.fillStyle = "#44ff88";
+                mmCtx.fillRect(it.gx*cS+cS/2-1.5, it.gz*cS+cS/2-1.5, 3, 3);
+            }
+        });
+        enemies.forEach(function(em) {
+            if (em.alive) {
+                var emx = em.x/CELL*cS, emz = em.z/CELL*cS;
+                mmCtx.fillStyle = "#ff3333";
+                mmCtx.beginPath(); mmCtx.arc(emx, emz, 2.5, 0, Math.PI*2); mmCtx.fill();
+            }
+        });
+        var ppx2 = player.x/CELL*cS, ppz2 = player.z/CELL*cS;
+        mmCtx.fillStyle = "#ffffff";
+        mmCtx.beginPath(); mmCtx.arc(ppx2, ppz2, 3, 0, Math.PI*2); mmCtx.fill();
+        mmCtx.strokeStyle = "#ffffff"; mmCtx.lineWidth = 1.5;
+        mmCtx.beginPath();
+        mmCtx.moveTo(ppx2, ppz2);
+        mmCtx.lineTo(ppx2 - Math.sin(player.angle)*7, ppz2 - Math.cos(player.angle)*7);
+        mmCtx.stroke();
+    }
+
     // ── Animate objects ──
     var t = now / 1000;
     enemies.forEach(function(e, idx) {
+        if (e.dying) {
+            e.dyingTimer += dt;
+            var dyProg = Math.min(1.0, e.dyingTimer / 0.65);
+            e.mesh.position.y = CELL*0.4 - dyProg * 1.4;
+            e.mesh.scale.setScalar(1.0 - dyProg * 0.85);
+            e.mesh.children.forEach(function(ch) {
+                if (ch.material) { ch.material.transparent = true; ch.material.opacity = 1.0 - dyProg; }
+            });
+            if (e.dyingTimer >= 0.65) { scene.remove(e.mesh); e.dying = false; }
+            return;
+        }
         if (!e.alive) return;
         e.mesh.position.set(e.x, CELL*0.4 + Math.sin(t*1.8 + idx*1.2)*0.08, e.z);
         e.mesh.rotation.y = Math.atan2(player.x - e.x, player.z - e.z);
