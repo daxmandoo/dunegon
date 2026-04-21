@@ -11,13 +11,13 @@ var sprintFill  = document.getElementById("sprint-fill");
 // ── Scene ──
 var scene = new THREE.Scene();
 scene.background = new THREE.Color(0x080810);
-scene.fog = new THREE.Fog(0x080810, 6, 24);
+scene.fog = new THREE.Fog(0x080810, 8, 40);
 
 var camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
 camera.rotation.order = "YXZ";
 
 var renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: false });
-var PIXEL_RATIO = 0.35; // render at 35% resolution then upscale = pixelated look
+var PIXEL_RATIO = 1.0; // full resolution for realistic textures
 renderer.setPixelRatio(PIXEL_RATIO);
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
@@ -31,18 +31,24 @@ window.addEventListener("resize", function() {
     camera.updateProjectionMatrix();
 });
 // ── Dungeon ──
-var CELL = 4, GRID = 10;
+var CELL = 4, GRID = 16;
 var MAP = [
-    [1,1,1,1,1,1,1,1,1,1],
-    [1,0,0,0,0,0,0,0,0,1],
-    [1,0,1,1,0,1,0,1,0,1],
-    [1,0,0,1,0,0,0,0,0,1],
-    [1,0,0,0,0,1,1,0,0,1],
-    [1,0,1,0,0,0,0,0,0,1],
-    [1,0,1,0,1,0,1,1,0,1],
-    [1,0,0,0,0,0,0,0,0,1],
-    [1,0,0,1,0,0,1,0,0,1],
-    [1,1,1,1,1,1,1,1,1,1]
+    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+    [1,0,0,0,0,0,1,0,0,0,0,0,0,0,0,1],
+    [1,0,1,1,0,0,1,0,1,1,0,1,0,1,0,1],
+    [1,0,1,0,0,0,0,0,0,1,0,1,0,0,0,1],
+    [1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,1],
+    [1,0,1,0,1,0,1,1,1,0,0,1,1,0,0,1],
+    [1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+    [1,0,0,0,0,0,1,0,1,1,0,1,0,1,0,1],
+    [1,1,1,0,1,0,0,0,0,0,0,0,0,1,0,1],
+    [1,0,0,0,1,0,1,1,0,1,0,0,0,0,0,1],
+    [1,0,1,0,0,0,0,0,0,1,0,1,1,0,0,1],
+    [1,0,1,1,0,0,0,1,0,0,0,0,0,0,0,1],
+    [1,0,0,0,0,1,0,0,0,1,0,0,0,1,0,1],
+    [1,0,1,0,0,1,0,1,0,0,0,0,0,0,0,1],
+    [1,0,1,0,0,0,0,0,0,1,0,1,0,0,0,1],
+    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
 ];
 
 function isWall(gx, gz) {
@@ -65,47 +71,218 @@ torchLight.shadow.camera.far = 14;
 scene.add(torchLight);
 
 // ── Wall sconce lights ──
-[{gx:2,gz:2},{gx:7,gz:2},{gx:2,gz:7},{gx:7,gz:7},{gx:1,gz:5},{gx:5,gz:1},{gx:8,gz:5}].forEach(function(c) {
-    var sc = new THREE.PointLight(0xff5500, 1.6, 9);
+[{gx:1,gz:2},{gx:7,gz:2},{gx:14,gz:2},
+ {gx:2,gz:7},{gx:7,gz:7},{gx:12,gz:7},
+ {gx:2,gz:12},{gx:7,gz:12},{gx:14,gz:12},
+ {gx:5,gz:5},{gx:10,gz:10},{gx:13,gz:9},
+ {gx:3,gz:14},{gx:9,gz:4},{gx:11,gz:13}].forEach(function(c) {
+    var sc = new THREE.PointLight(0xff5500, 1.8, 11);
     sc.position.set(c.gx*CELL+CELL/2, CELL*0.75, c.gz*CELL+CELL/2);
     scene.add(sc);
 });
 
 // ── Procedural Textures ──
 function makeBrickTex() {
-    // 16x16 pixelated voxel stone tile
-    var cv = document.createElement("canvas"); cv.width = 16; cv.height = 16;
+    var S = 512;          // texture resolution
+    var BW = 64, BH = 32; // brick width/height in pixels — realistic 2:1 ratio
+    var MORTAR = 3;        // mortar thickness in pixels
+    var cv = document.createElement("canvas"); cv.width = S; cv.height = S;
     var ctx = cv.getContext("2d");
-    var stoneColors = ["#3a3535","#433e3e","#4a4444","#302c2c","#3e3939"];
-    for (var py=0; py<16; py++) for (var ppx=0; ppx<16; ppx++) {
-        ctx.fillStyle = stoneColors[Math.floor(Math.abs(Math.sin(ppx*7+py*13)*5))];
-        ctx.fillRect(ppx,py,1,1);
+    var imgData = ctx.createImageData(S, S);
+    var px = imgData.data;
+
+    // Seeded pseudo-random
+    function rng(x, y, s) {
+        var v = Math.sin(x * 127.1 + y * 311.7 + (s||0) * 74.3) * 43758.5453;
+        return v - Math.floor(v);
     }
-    // mortar lines (grid pattern)
-    ctx.fillStyle = "#1a1818";
-    for (var my=0; my<16; my+=8) ctx.fillRect(0,my,16,1);
-    ctx.fillRect(0,0,1,8); ctx.fillRect(8,8,1,8);
+    // Value noise — smooth random
+    function vnoise(x, y) {
+        var ix = Math.floor(x), iy = Math.floor(y);
+        var fx = x - ix, fy = y - iy;
+        fx = fx*fx*(3-2*fx); fy = fy*fy*(3-2*fy);
+        var a = rng(ix,iy), b = rng(ix+1,iy), c = rng(ix,iy+1), d = rng(ix+1,iy+1);
+        return a + (b-a)*fx + (c-a)*fy + (a-b-c+d)*fx*fy;
+    }
+    // Multi-octave fBm
+    function fbm(x, y, oct) {
+        var v=0, amp=0.5, freq=1, tot=0;
+        for (var o=0; o<(oct||4); o++) { v+=vnoise(x*freq,y*freq)*amp; tot+=amp; amp*=0.5; freq*=2.1; }
+        return v/tot;
+    }
+
+    var rows = S / BH;
+    for (var row = 0; row < rows; row++) {
+        var offsetX = (row % 2 === 0) ? 0 : BW / 2;
+        var cols = Math.ceil(S / BW) + 1;
+        for (var col = 0; col < cols; col++) {
+            var bx0 = Math.round(col * BW - offsetX);
+            var by0 = Math.round(row * BH);
+
+            // Per-brick base color — earthy red/brown/orange variation
+            var brickSeed = rng(col, row);
+            var hueShift = brickSeed * 0.18 - 0.09;
+            // Base RGB for this brick
+            var baseR = 130 + Math.round(brickSeed * 55 - 27);
+            var baseG = 75  + Math.round(rng(col,row,1) * 30 - 15);
+            var baseB = 58  + Math.round(rng(col,row,2) * 25 - 12);
+
+            for (var py = by0 + MORTAR; py < by0 + BH - MORTAR; py++) {
+                if (py < 0 || py >= S) continue;
+                for (var ppx = bx0 + MORTAR; ppx < bx0 + BW - MORTAR; ppx++) {
+                    var wpx = ((ppx % S) + S) % S;
+                    if (wpx < 0 || wpx >= S) continue;
+
+                    var u = (ppx - bx0) / BW;
+                    var v2 = (py - by0) / BH;
+
+                    // Surface noise at multiple scales
+                    var n1 = fbm(ppx * 0.08, py * 0.08, 4);  // large bumps
+                    var n2 = fbm(ppx * 0.3,  py * 0.3,  3);  // medium grit
+                    var n3 = fbm(ppx * 1.2,  py * 1.2,  2);  // fine grain
+
+                    // Edge bevel — darken near mortar edges
+                    var edgeU = Math.min(u - MORTAR/BW, 1.0 - MORTAR/BW - u);
+                    var edgeV = Math.min(v2 - MORTAR/BH, 1.0 - MORTAR/BH - v2);
+                    var edgeFactor = Math.min(edgeU, edgeV) * BW * 0.35;
+                    var bevel = Math.min(1.0, Math.max(0.0, edgeFactor));
+
+                    // Fake surface normal from noise gradient → lighting
+                    var gx = fbm(ppx*0.08+0.5, py*0.08) - fbm(ppx*0.08-0.5, py*0.08);
+                    var gy = fbm(ppx*0.08, py*0.08+0.5) - fbm(ppx*0.08, py*0.08-0.5);
+                    var light = 0.72 + gx*0.8 + gy*0.5 + n1*0.18 + n2*0.08;
+                    light = Math.max(0.3, Math.min(1.3, light));
+
+                    // Crack / stain streaks
+                    var stain = fbm(ppx*0.04 + row*13.7, py*0.04 + col*7.3, 3);
+                    var stainAmt = Math.max(0, stain - 0.55) * 1.2;
+
+                    var r2 = (baseR + n1*28 + n2*12 + n3*6) * light * bevel;
+                    var g2 = (baseG + n1*14 + n2*8  + n3*3) * light * bevel;
+                    var b2 = (baseB + n1*10 + n2*5  + n3*2) * light * bevel;
+
+                    // Apply dark stain
+                    r2 = r2 * (1 - stainAmt*0.6);
+                    g2 = g2 * (1 - stainAmt*0.5);
+                    b2 = b2 * (1 - stainAmt*0.3);
+
+                    var idx = (py * S + wpx) * 4;
+                    px[idx]   = Math.min(255, Math.max(0, Math.round(r2)));
+                    px[idx+1] = Math.min(255, Math.max(0, Math.round(g2)));
+                    px[idx+2] = Math.min(255, Math.max(0, Math.round(b2)));
+                    px[idx+3] = 255;
+                }
+            }
+        }
+    }
+
+    // Draw mortar — gritty grey with noise
+    for (var my = 0; my < S; my++) {
+        for (var mx = 0; mx < S; mx++) {
+            var row2 = Math.floor(my / BH);
+            var off2 = (row2 % 2 === 0) ? 0 : BW / 2;
+            var localX = ((mx + off2) % BW + BW) % BW;
+            var localY = my % BH;
+            var inMortarX = localX < MORTAR || localX >= BW - MORTAR;
+            var inMortarY = localY < MORTAR || localY >= BH - MORTAR;
+            if (inMortarX || inMortarY) {
+                var mn = fbm(mx*0.15, my*0.15, 3);
+                var mv = Math.round(38 + mn * 28);
+                var midx = (my * S + mx) * 4;
+                px[midx]   = mv + 4;
+                px[midx+1] = mv;
+                px[midx+2] = mv - 3;
+                px[midx+3] = 255;
+            }
+        }
+    }
+
+    ctx.putImageData(imgData, 0, 0);
     var t = new THREE.CanvasTexture(cv);
-    t.magFilter = THREE.NearestFilter;
-    t.minFilter = THREE.NearestFilter;
+    t.magFilter = THREE.LinearFilter;
+    t.minFilter = THREE.LinearMipmapLinearFilter;
+    t.generateMipmaps = true;
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
     return t;
 }
 function makeFloorTex() {
-    // 16x16 pixelated voxel dirt/stone floor
-    var cv = document.createElement("canvas"); cv.width = 16; cv.height = 16;
+    var S = 512, TS = 64, GROUT = 3;
+    var cv = document.createElement("canvas"); cv.width = S; cv.height = S;
     var ctx = cv.getContext("2d");
-    var floorColors = ["#1e1c17","#221f19","#252219","#1a1812","#201d15"];
-    for (var py=0; py<16; py++) for (var ppx=0; ppx<16; ppx++) {
-        ctx.fillStyle = floorColors[Math.floor(Math.abs(Math.sin(ppx*3+py*17)*5))];
-        ctx.fillRect(ppx,py,1,1);
+    var imgData = ctx.createImageData(S, S);
+    var px = imgData.data;
+
+    function rng(x, y, s) {
+        var v = Math.sin(x * 127.1 + y * 311.7 + (s||0) * 74.3) * 43758.5453;
+        return v - Math.floor(v);
     }
-    ctx.fillStyle = "#111009";
-    for (var mx=0; mx<16; mx+=8) ctx.fillRect(mx,0,1,16);
-    for (var mmy=0; mmy<16; mmy+=8) ctx.fillRect(0,mmy,16,1);
+    function vnoise(x, y) {
+        var ix = Math.floor(x), iy = Math.floor(y);
+        var fx = x-ix, fy = y-iy;
+        fx=fx*fx*(3-2*fx); fy=fy*fy*(3-2*fy);
+        return rng(ix,iy)+(rng(ix+1,iy)-rng(ix,iy))*fx+(rng(ix,iy+1)-rng(ix,iy))*fy+(rng(ix,iy)+rng(ix+1,iy+1)-rng(ix+1,iy)-rng(ix,iy+1))*fx*fy;
+    }
+    function fbm(x, y, oct) {
+        var v=0, amp=0.5, freq=1, tot=0;
+        for (var o=0;o<(oct||4);o++){v+=vnoise(x*freq,y*freq)*amp;tot+=amp;amp*=0.5;freq*=2.1;}
+        return v/tot;
+    }
+
+    var tiles = S / TS;
+    for (var ty2 = 0; ty2 < S; ty2++) {
+        for (var tx2 = 0; tx2 < S; tx2++) {
+            var col2 = Math.floor(tx2 / TS);
+            var row2 = Math.floor(ty2 / TS);
+            var lx = tx2 % TS, ly = ty2 % TS;
+            var inGroutX = lx < GROUT || lx >= TS - GROUT;
+            var inGroutY = ly < GROUT || ly >= TS - GROUT;
+
+            var idx = (ty2 * S + tx2) * 4;
+            if (inGroutX || inGroutY) {
+                // Grout — dark sandy grey
+                var gn = fbm(tx2*0.12, ty2*0.12, 3);
+                var gv = Math.round(28 + gn * 22);
+                px[idx]=gv+2; px[idx+1]=gv+1; px[idx+2]=gv-2; px[idx+3]=255;
+            } else {
+                var tileSeed = rng(col2, row2);
+                var u = lx / TS, v3 = ly / TS;
+
+                // Surface noise layers
+                var n1 = fbm(tx2*0.06, ty2*0.06, 5);
+                var n2 = fbm(tx2*0.25, ty2*0.25, 3);
+                var n3 = fbm(tx2*0.9,  ty2*0.9,  2);
+
+                // Bevel at edges
+                var eu = Math.min(u - GROUT/TS, 1 - GROUT/TS - u);
+                var ev = Math.min(v3 - GROUT/TS, 1 - GROUT/TS - v3);
+                var bevel = Math.min(1, Math.max(0, Math.min(eu, ev) * TS * 0.4));
+
+                // Fake surface normal lighting
+                var gx2 = fbm(tx2*0.06+0.5,ty2*0.06)-fbm(tx2*0.06-0.5,ty2*0.06);
+                var gy2 = fbm(tx2*0.06,ty2*0.06+0.5)-fbm(tx2*0.06,ty2*0.06-0.5);
+                var light2 = Math.max(0.35, Math.min(1.2, 0.75 + gx2*0.6 + gy2*0.4 + n1*0.15));
+
+                // Base stone color — dark grey/brown
+                var baseR2 = 52 + Math.round(tileSeed * 20 - 10);
+                var baseG2 = 48 + Math.round(rng(col2,row2,1)*16-8);
+                var baseB2 = 40 + Math.round(rng(col2,row2,2)*12-6);
+
+                var r3 = (baseR2 + n1*22 + n2*10 + n3*5) * light2 * bevel;
+                var g3 = (baseG2 + n1*16 + n2*7  + n3*3) * light2 * bevel;
+                var b3 = (baseB2 + n1*12 + n2*5  + n3*2) * light2 * bevel;
+
+                px[idx]  =Math.min(255,Math.max(0,Math.round(r3)));
+                px[idx+1]=Math.min(255,Math.max(0,Math.round(g3)));
+                px[idx+2]=Math.min(255,Math.max(0,Math.round(b3)));
+                px[idx+3]=255;
+            }
+        }
+    }
+    ctx.putImageData(imgData, 0, 0);
     var t = new THREE.CanvasTexture(cv);
-    t.magFilter = THREE.NearestFilter;
-    t.minFilter = THREE.NearestFilter;
+    t.magFilter = THREE.LinearFilter;
+    t.minFilter = THREE.LinearMipmapLinearFilter;
+    t.generateMipmaps = true;
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
     return t;
 }
@@ -118,6 +295,7 @@ ceilTex.repeat.set(GRID, GRID);
 
 // ── Custom Wall Shader ──
 var wallVert = [
+"#pragma vscode_glsllint_stage: vert",
 "varying vec2 vUv;",
 "varying vec3 vNormal;",
 "varying vec3 vWorldPos;",
@@ -130,6 +308,7 @@ var wallVert = [
 ].join("\n");
 
 var wallFrag = [
+"#pragma vscode_glsllint_stage: frag",
 "uniform float time;",
 "uniform sampler2D brickMap;",
 "varying vec2 vUv;",
@@ -203,7 +382,13 @@ function makeVoxelEnemy() {
 }
 // ── Voxel Item ──
 var itemGeo = new THREE.BoxGeometry(0.55, 0.55, 0.55);
-var wallGeo   = new THREE.BoxGeometry(CELL, CELL, CELL);
+// Voxel wall: backing slab + 100-brick (10x10) protrusions per face
+var BROWS = 10, BCOLS = 10;
+var BW = CELL / BCOLS, BH = CELL / BROWS;
+var voxBrickGeoZ = new THREE.BoxGeometry(BW * 0.86, BH * 0.86, 1.0); // depth set per-instance via scale.z
+var voxBrickGeoX = new THREE.BoxGeometry(1.0, BH * 0.86, BW * 0.86); // depth set per-instance via scale.x
+var voxBrickMat  = new THREE.MeshStandardMaterial({ map: brickTex, roughness: 0.9, metalness: 0.0 });
+var backSlabGeo  = new THREE.BoxGeometry(CELL, CELL, CELL);
 var floorGeo  = new THREE.PlaneGeometry(GRID * CELL, GRID * CELL);
 var remoteGeo = new THREE.BoxGeometry(0.9, 1.9, 0.9);
 
@@ -221,10 +406,21 @@ var remoteGeo = new THREE.BoxGeometry(0.9, 1.9, 0.9);
     ceil.receiveShadow = true;
     scene.add(ceil);
 
+    // ── Puddles ──
+    var puddleMat = new THREE.MeshStandardMaterial({ color: 0x1a2a38, roughness: 0.04, metalness: 0.9, opacity: 0.7, transparent: true });
+    [{gx:5,gz:4,sw:1.4,sd:0.9},{gx:8,gz:9,sw:1.8,sd:1.1},{gx:11,gz:11,sw:1.2,sd:0.8},
+     {gx:3,gz:13,sw:2.0,sd:1.0},{gx:7,gz:4,sw:1.0,sd:0.7},{gx:10,gz:5,sw:1.5,sd:1.3}].forEach(function(p) {
+        var pg = new THREE.PlaneGeometry(CELL*p.sw, CELL*p.sd);
+        var pm = new THREE.Mesh(pg, puddleMat);
+        pm.rotation.x = -Math.PI/2;
+        pm.position.set(p.gx*CELL+CELL/2, 0.01, p.gz*CELL+CELL/2);
+        scene.add(pm);
+    });
+
     for (var gz = 0; gz < GRID; gz++) {
         for (var gx = 0; gx < GRID; gx++) {
             if (MAP[gz][gx] === 1) {
-                var w = new THREE.Mesh(wallGeo, wallMat);
+                var w = new THREE.Mesh(backSlabGeo, wallMat);
                 w.position.set(gx * CELL + CELL / 2, CELL / 2, gz * CELL + CELL / 2);
                 w.castShadow = true;
                 w.receiveShadow = true;
@@ -234,16 +430,158 @@ var remoteGeo = new THREE.BoxGeometry(0.9, 1.9, 0.9);
     }
 })();
 
-var ENEMY_CELLS = [{gx:8,gz:8},{gx:7,gz:3},{gx:3,gz:7},{gx:5,gz:5}];
-var ITEM_CELLS  = [{gx:5,gz:1},{gx:1,gz:5},{gx:8,gz:2},{gx:2,gz:8},{gx:6,gz:6},{gx:3,gz:3}];
+// ── Voxel brick protrusions (100 individually-colored bricks per exposed wall face) ──
+(function() {
+    function isEmpty(gx2, gz2) {
+        if (gx2 < 0 || gx2 >= GRID || gz2 < 0 || gz2 >= GRID) return true;
+        return MAP[gz2][gx2] === 0;
+    }
+    function brickRng(a, b) {
+        var v = Math.sin(a * 127.1 + b * 311.7) * 43758.5453;
+        return v - Math.floor(v);
+    }
+    // Count instances needed
+    var cntZ = 0, cntX = 0;
+    for (var gz = 0; gz < GRID; gz++) {
+        for (var gx = 0; gx < GRID; gx++) {
+            if (MAP[gz][gx] !== 1) continue;
+            if (isEmpty(gx, gz-1)) cntZ += BROWS * BCOLS;
+            if (isEmpty(gx, gz+1)) cntZ += BROWS * BCOLS;
+            if (isEmpty(gx-1, gz)) cntX += BROWS * BCOLS;
+            if (isEmpty(gx+1, gz)) cntX += BROWS * BCOLS;
+        }
+    }
+    // Use vertex colors blended with the brick texture
+    var instMatZ = new THREE.MeshStandardMaterial({ map: brickTex, roughness: 0.88, metalness: 0.0, vertexColors: false });
+    var instMatX = new THREE.MeshStandardMaterial({ map: brickTex, roughness: 0.88, metalness: 0.0, vertexColors: false });
+    var instZ = new THREE.InstancedMesh(voxBrickGeoZ, instMatZ, cntZ);
+    var instX = new THREE.InstancedMesh(voxBrickGeoX, instMatX, cntX);
+    instZ.castShadow = instX.castShadow = true;
+    instZ.receiveShadow = instX.receiveShadow = true;
+    instZ.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(cntZ * 3), 3);
+    instX.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(cntX * 3), 3);
+    var dummy = new THREE.Object3D();
+    var col3 = new THREE.Color();
+    var iZ = 0, iX = 0;
+    for (var gz = 0; gz < GRID; gz++) {
+        for (var gx = 0; gx < GRID; gx++) {
+            if (MAP[gz][gx] !== 1) continue;
+            var wx = gx * CELL + CELL / 2;
+            var wz = gz * CELL + CELL / 2;
+            // Z-facing exposed faces
+            var zFaces = [{nz: gz-1, signZ: -1}, {nz: gz+1, signZ: 1}];
+            for (var fi = 0; fi < 2; fi++) {
+                if (!isEmpty(gx, zFaces[fi].nz)) continue;
+                var sZ = zFaces[fi].signZ;
+                for (var row = 0; row < BROWS; row++) {
+                    for (var col = 0; col < BCOLS; col++) {
+                        var seed = brickRng(col + gx*17.3 + fi*99, row + gz*13.7);
+                        var dep = 0.18;
+                        dummy.position.set(
+                            wx + (col - BCOLS/2 + 0.5) * BW,
+                            (row + 0.5) * BH,
+                            wz + sZ * (CELL/2 + dep/2)
+                        );
+                        dummy.scale.set(1, 1, dep);
+                        dummy.rotation.set(0, 0, 0);
+                        dummy.updateMatrix();
+                        instZ.setMatrixAt(iZ, dummy.matrix);
+                        // Individual brick color: earthy red/brown/tan variation
+                        var r2 = brickRng(col*7.1+gx*3.3, row*11.9+gz*5.7);
+                        var r3 = brickRng(col*3.7+gz*8.1, row*6.3+gx*2.9);
+                        col3.setRGB(
+                            0.48 + r2 * 0.22,           // red channel 0.48–0.70
+                            0.28 + r3 * 0.12,           // green channel 0.28–0.40
+                            0.20 + brickRng(col,row) * 0.10  // blue channel 0.20–0.30
+                        );
+                        instZ.setColorAt(iZ, col3);
+                        iZ++;
+                    }
+                }
+            }
+            // X-facing exposed faces
+            var xFaces = [{nx: gx-1, signX: -1}, {nx: gx+1, signX: 1}];
+            for (var fi2 = 0; fi2 < 2; fi2++) {
+                if (!isEmpty(xFaces[fi2].nx, gz)) continue;
+                var sX = xFaces[fi2].signX;
+                for (var row2 = 0; row2 < BROWS; row2++) {
+                    for (var col2 = 0; col2 < BCOLS; col2++) {
+                        var seed2 = brickRng(col2 + gx*17.3 + fi2*99 + 50, row2 + gz*13.7);
+                        var dep2 = 0.18;
+                        dummy.position.set(
+                            wx + sX * (CELL/2 + dep2/2),
+                            (row2 + 0.5) * BH,
+                            wz + (col2 - BCOLS/2 + 0.5) * BW
+                        );
+                        dummy.scale.set(dep2, 1, 1);
+                        dummy.rotation.set(0, 0, 0);
+                        dummy.updateMatrix();
+                        instX.setMatrixAt(iX, dummy.matrix);
+                        var r4 = brickRng(col2*7.1+gx*3.3+20, row2*11.9+gz*5.7);
+                        var r5 = brickRng(col2*3.7+gz*8.1+20, row2*6.3+gx*2.9);
+                        col3.setRGB(
+                            0.48 + r4 * 0.22,
+                            0.28 + r5 * 0.12,
+                            0.20 + brickRng(col2+10, row2+10) * 0.10
+                        );
+                        instX.setColorAt(iX, col3);
+                        iX++;
+                    }
+                }
+            }
+        }
+    }
+    instZ.instanceMatrix.needsUpdate = true;
+    instX.instanceMatrix.needsUpdate = true;
+    if (instZ.instanceColor) instZ.instanceColor.needsUpdate = true;
+    if (instX.instanceColor) instX.instanceColor.needsUpdate = true;
+    scene.add(instZ);
+    scene.add(instX);
+})();
+
+var ENEMY_CELLS = [
+    {gx:5,gz:3},{gx:10,gz:2},{gx:3,gz:7},{gx:9,gz:8},
+    {gx:7,gz:10},{gx:2,gz:12},{gx:12,gz:12},{gx:6,gz:14}
+];
+var ITEM_CELLS  = [
+    {gx:4,gz:1},{gx:1,gz:4},{gx:8,gz:3},{gx:13,gz:3},
+    {gx:5,gz:8},{gx:11,gz:6},{gx:4,gz:11},{gx:13,gz:11},
+    {gx:8,gz:13},{gx:10,gz:7}
+];
 
 // ── Game state ──
 var enemies = [], items = [], player = {}, gameOver = false, won = false, gameRunning = false;
-var keys = {};
+var dmgFlashEl = document.getElementById("dmg-flash");
+
+// ── Sticky-key-proof input system ──
+// Track keys by e.code + timestamp; auto-expire after 2s if keyup missed
+var keyDownAt = Object.create(null);
+var KEY_TIMEOUT = 2000;
+function isKeyDown(code) {
+    if (!keyDownAt[code]) return false;
+    if (performance.now() - keyDownAt[code] > KEY_TIMEOUT) { delete keyDownAt[code]; return false; }
+    return true;
+}
+function clearAllKeys() {
+    var k;
+    for (k in keyDownAt) delete keyDownAt[k];
+}
+document.addEventListener("keydown", function(e) {
+    keyDownAt[e.code] = performance.now();
+    if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Space"].indexOf(e.code) >= 0) e.preventDefault();
+});
+document.addEventListener("keyup", function(e) {
+    delete keyDownAt[e.code];
+});
+window.addEventListener("blur", clearAllKeys);
+document.addEventListener("visibilitychange", function() {
+    if (document.hidden) clearAllKeys();
+});
 
 // ── Sprint ──
 var MOVE_SPEED   = 5;
 var SPRINT_SPEED = 11;
+var ENEMY_SPEED  = 1.6;
 var stamina = 100, maxStamina = 100;
 
 // ── Multiplayer ──
@@ -260,10 +598,11 @@ function initGame(startX, startZ) {
 
     ENEMY_CELLS.forEach(function(pos) {
         var mesh = makeVoxelEnemy();
-        mesh.position.copy(cellCenter(pos.gx, pos.gz));
+        var cc = cellCenter(pos.gx, pos.gz);
+        mesh.position.copy(cc);
         mesh.add(new THREE.PointLight(0xff2200, 1.8, 8));
         scene.add(mesh);
-        enemies.push({ mesh: mesh, gx: pos.gx, gz: pos.gz, alive: true });
+        enemies.push({ mesh: mesh, gx: pos.gx, gz: pos.gz, x: cc.x, z: cc.z, alive: true });
     });
 
     ITEM_CELLS.forEach(function(pos) {
@@ -276,7 +615,7 @@ function initGame(startX, startZ) {
 
     var sx = startX !== undefined ? startX : cellCenter(1, 1).x;
     var sz = startZ !== undefined ? startZ : cellCenter(1, 1).z;
-    player = { x: sx, z: sz, angle: 0, hp: 5, score: 0 };
+    player = { x: sx, z: sz, angle: 0, hp: 5, score: 0, invincible: 0 };
 
     gameRunning = true;
     lobbyEl.style.display = "none";
@@ -304,11 +643,10 @@ function updateStatus() {
     statusEl.textContent = "HP: " + h + "   Score: " + player.score + "   Gems: " + gl + "   Enemies: " + el;
 }
 
-document.addEventListener("keydown", function(e) {
-    keys[e.key] = true;
-    if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"," "].indexOf(e.key) >= 0) e.preventDefault();
+document.addEventListener("pointerlockchange", function() {
+    pointerLocked = (document.pointerLockElement === canvas);
+    if (!pointerLocked) clearAllKeys();
 });
-document.addEventListener("keyup", function(e) { keys[e.key] = false; });
 
 var TURN_SPEED = 1.5, PLAYER_RADIUS = 0.9;
 var pointerLocked = false;
@@ -319,9 +657,6 @@ var bobTime = 0;
 // ── Pointer Lock (Mouse Look) ──
 canvas.addEventListener("click", function() {
     if (!pointerLocked) canvas.requestPointerLock();
-});
-document.addEventListener("pointerlockchange", function() {
-    pointerLocked = (document.pointerLockElement === canvas);
 });
 document.addEventListener("mousemove", function(e) {
     if (pointerLocked && gameRunning && !gameOver && !won) {
@@ -421,8 +756,8 @@ function animate(now) {
     renderer.render(scene, camera);
     if (!gameRunning) return;
 
-    if (keys["r"] || keys["R"]) {
-        keys["r"] = false; keys["R"] = false;
+    if (isKeyDown("KeyR")) {
+        delete keyDownAt["KeyR"];
         initGame();
         return;
     }
@@ -431,12 +766,12 @@ function animate(now) {
 
     // ── Turning (only when pointer NOT locked — otherwise A/D strafe) ──
     if (!pointerLocked) {
-        if (keys["ArrowLeft"]  || keys["a"] || keys["A"]) player.angle += TURN_SPEED * dt;
-        if (keys["ArrowRight"] || keys["d"] || keys["D"]) player.angle -= TURN_SPEED * dt;
+        if (isKeyDown("ArrowLeft")  || isKeyDown("KeyA")) player.angle += TURN_SPEED * dt;
+        if (isKeyDown("ArrowRight") || isKeyDown("KeyD")) player.angle -= TURN_SPEED * dt;
     }
 
     // ── Sprint stamina ──
-    var sprinting = (keys["Shift"] || keys["ShiftLeft"] || keys["ShiftRight"]) && stamina > 0;
+    var sprinting = (isKeyDown("ShiftLeft") || isKeyDown("ShiftRight")) && stamina > 0;
     if (sprinting) {
         stamina = Math.max(0, stamina - 45 * dt);
     } else {
@@ -449,10 +784,10 @@ function animate(now) {
     var speed = sprinting ? SPRINT_SPEED : MOVE_SPEED;
     var sinA = Math.sin(player.angle), cosA = Math.cos(player.angle);
     var moveX = 0, moveZ = 0;
-    var fwd  = (keys["ArrowUp"]    || keys["w"] || keys["W"]) ? 1 : 0;
-    var back = (keys["ArrowDown"]  || keys["s"] || keys["S"]) ? 1 : 0;
-    var strafeL = (pointerLocked && (keys["a"] || keys["A"] || keys["ArrowLeft"]))  ? 1 : 0;
-    var strafeR = (pointerLocked && (keys["d"] || keys["D"] || keys["ArrowRight"])) ? 1 : 0;
+    var fwd     = (isKeyDown("ArrowUp")    || isKeyDown("KeyW")) ? 1 : 0;
+    var back    = (isKeyDown("ArrowDown")  || isKeyDown("KeyS")) ? 1 : 0;
+    var strafeL = (pointerLocked && (isKeyDown("KeyA") || isKeyDown("ArrowLeft")))  ? 1 : 0;
+    var strafeR = (pointerLocked && (isKeyDown("KeyD") || isKeyDown("ArrowRight"))) ? 1 : 0;
     moveX += -sinA * (fwd - back) + (-cosA) * (strafeL - strafeR);
     moveZ += -cosA * (fwd - back) + ( sinA) * (strafeL - strafeR);
     var moveLen = Math.sqrt(moveX*moveX + moveZ*moveZ);
@@ -466,16 +801,32 @@ function animate(now) {
     var gxc = Math.floor(player.x / CELL);
     if (!isWall(gxc, Math.floor((nz-r)/CELL)) && !isWall(gxc, Math.floor((nz+r)/CELL))) player.z = nz;
 
-    // ── Enemy collision ──
+    // ── Invincibility timer ──
+    if (player.invincible > 0) player.invincible = Math.max(0, player.invincible - dt);
+
+    // ── Enemy AI: chase player + collision ──
+    var er = 0.45;
     enemies.forEach(function(e, idx) {
         if (!e.alive) return;
-        var c = cellCenter(e.gx, e.gz);
-        if (Math.hypot(player.x - c.x, player.z - c.z) < 2) {
-            e.alive = false;
-            scene.remove(e.mesh);
+        var dx = player.x - e.x;
+        var dz = player.z - e.z;
+        var dist = Math.sqrt(dx*dx + dz*dz);
+        // Move toward player
+        if (dist > 0.8) {
+            var enx = e.x + (dx/dist) * ENEMY_SPEED * dt;
+            var enz = e.z + (dz/dist) * ENEMY_SPEED * dt;
+            var egzc = Math.floor(e.z / CELL);
+            if (!isWall(Math.floor((enx-er)/CELL), egzc) && !isWall(Math.floor((enx+er)/CELL), egzc)) e.x = enx;
+            var egxc = Math.floor(e.x / CELL);
+            if (!isWall(egxc, Math.floor((enz-er)/CELL)) && !isWall(egxc, Math.floor((enz+er)/CELL))) e.z = enz;
+        }
+        // Damage player if touching
+        if (dist < 1.3 && !player.invincible) {
             player.hp--;
+            player.invincible = 1.5;
+            if (dmgFlashEl) { dmgFlashEl.style.opacity = "0.7"; setTimeout(function(){ dmgFlashEl.style.opacity="0"; }, 350); }
             if (conn && conn.open) conn.send(JSON.stringify({ type: "enemyKill", idx: idx }));
-            if (player.hp <= 0) { gameOver = true; updateStatus(); return; }
+            if (player.hp <= 0) { gameOver = true; updateStatus(); }
         }
     });
 
@@ -510,15 +861,18 @@ function animate(now) {
         : "inset 0 0 40px 10px rgba(0,0,0,0.6)";
 
     // ── Head bob ──
-    var isMoving = (keys["w"]||keys["W"]||keys["ArrowUp"]||keys["s"]||keys["S"]||keys["ArrowDown"]);
+    var isMoving = isKeyDown("KeyW") || isKeyDown("ArrowUp") || isKeyDown("KeyS") || isKeyDown("ArrowDown");
     if (isMoving) bobTime += dt * (sprinting ? 9 : 6);
     var bobY = isMoving ? Math.sin(bobTime) * 0.06 : Math.sin(bobTime) * 0.006;
 
     // ── Torch flicker ──
     torchLight.intensity = 3.5 + Math.sin(now * 0.009) * 0.5 + (Math.random() * 0.4 - 0.2);
 
+    // ── Invincibility camera shake ──
+    var shakeX = player.invincible > 0 ? (Math.random()-0.5)*0.04 : 0;
+    var shakeY = player.invincible > 0 ? (Math.random()-0.5)*0.03 : 0;
     // ── Camera ──
-    camera.position.set(player.x, CELL * 0.55 + bobY, player.z);
+    camera.position.set(player.x + shakeX, CELL * 0.55 + bobY + shakeY, player.z);
     camera.rotation.y = player.angle;
     camera.rotation.x = playerPitch;
     torchLight.position.copy(camera.position);
@@ -527,8 +881,8 @@ function animate(now) {
     var t = now / 1000;
     enemies.forEach(function(e, idx) {
         if (!e.alive) return;
-        e.mesh.position.y = Math.sin(t*1.8 + idx*1.2) * 0.18;
-        e.mesh.rotation.y = t * 1.2;
+        e.mesh.position.set(e.x, CELL*0.4 + Math.sin(t*1.8 + idx*1.2)*0.08, e.z);
+        e.mesh.rotation.y = Math.atan2(player.x - e.x, player.z - e.z);
     });
     items.forEach(function(i, idx) {
         if (i.collected) return;
