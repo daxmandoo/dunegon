@@ -8,6 +8,54 @@ var roomCodeEl  = document.getElementById("room-code");
 var joinCodeEl  = document.getElementById("join-code");
 var sprintFill  = document.getElementById("sprint-fill");
 var steamBridge = window.steamBridge || null;
+var lastAutoJoinCode = "";
+var presenceLobbyEl = document.getElementById("presence-lobby");
+var presenceSteamEl = document.getElementById("presence-steam");
+var presenceFriendEl = document.getElementById("presence-friend");
+var qaLastActionEl = document.getElementById("qa-last-action");
+var qaJoinStatusEl = document.getElementById("qa-join-status");
+var friendPeerJoined = false;
+var qaMode = "";
+var qaJoinTimeoutHandle = null;
+
+// Unified label setter (was duplicated as setPresence + setQALabel)
+function setPresence(el, text, color) {
+    if (!el) return;
+    el.textContent = text;
+    if (color) el.style.color = color;
+}
+var setQALabel = setPresence;
+
+function updateQADiagnostics(actionText, joinText, joinColor) {
+    if (actionText) setQALabel(qaLastActionEl, actionText, "#f8f8f2");
+    if (joinText) setQALabel(qaJoinStatusEl, joinText, joinColor || "#f8f8f2");
+}
+
+function refreshLobbyPresence() {
+    if (!steamBridge || !steamBridge.getLobbyState) return;
+    steamBridge.getLobbyState().then(function(st) {
+        if (!st || !st.available) {
+            setPresence(presenceSteamEl, "Not connected", "#ffb86c");
+            if (!friendPeerJoined) setPresence(presenceFriendEl, "Not joined", "#ff6b6b");
+            return;
+        }
+        var lobbyReady = !!st.steamLobbyId;
+        setPresence(presenceLobbyEl, lobbyReady ? ("Active #" + st.steamLobbyId) : "Not created", lobbyReady ? "#50fa7b" : "#ffb86c");
+        setPresence(presenceSteamEl, "Members: " + (st.memberCount || 0), "#8be9fd");
+
+        if (friendPeerJoined) {
+            setPresence(presenceFriendEl, "Joined (P2P Connected)", "#50fa7b");
+        } else {
+            var joinedBySteam = (st.memberCount || 0) > 1;
+            setPresence(presenceFriendEl, joinedBySteam ? "Joined (Steam Lobby)" : "Waiting for friend", joinedBySteam ? "#50fa7b" : "#ffb86c");
+        }
+    }).catch(function() {});
+}
+
+setPresence(presenceLobbyEl, "Not created", "#ffb86c");
+setPresence(presenceSteamEl, "Not connected", "#ffb86c");
+setPresence(presenceFriendEl, "Not joined", "#ff6b6b");
+updateQADiagnostics("Idle", "Not started", "#f8f8f2");
 
 var launchParams = new URLSearchParams(window.location.search || "");
 var launchConnectLobby = (launchParams.get("connect_lobby") || "").trim();
@@ -15,18 +63,25 @@ var launchConnectLobby = (launchParams.get("connect_lobby") || "").trim();
 function initSteamStatus() {
     if (!steamBridge || !steamBridge.getStatus) return;
     steamBridge.getStatus().then(function(st) {
-        if (!st || !st.available) return;
+        if (!st) return;
+        if (!st.available) {
+            if (st.error) lobbyStatEl.textContent = "Steam init failed: " + st.error;
+            refreshLobbyPresence();
+            return;
+        }
         lobbyStatEl.textContent = "Steamworks connected. You can invite Steam friends.";
+        refreshLobbyPresence();
     }).catch(function() {});
 }
 initSteamStatus();
+setInterval(refreshLobbyPresence, 1400);
 
 // ── Scene ──
 var scene = new THREE.Scene();
 scene.background = new THREE.Color(0x080810);
-scene.fog = new THREE.Fog(0x080810, 8, 40);
+scene.fog = null;
 
-var camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
+var camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 220);
 camera.rotation.order = "YXZ";
 
 var renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: false });
@@ -35,8 +90,9 @@ renderer.setPixelRatio(PIXEL_RATIO);
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 0.9;
+renderer.toneMapping = THREE.NoToneMapping;
+renderer.toneMappingExposure = 1.0;
+renderer.setClearColor(0x080810, 1.0);
 
 window.addEventListener("resize", function() {
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -74,7 +130,7 @@ function cellCenter(gx, gz) {
 }
 
 // ── Lighting ──
-scene.add(new THREE.AmbientLight(0x110e22, 0.5));
+scene.add(new THREE.AmbientLight(0x221810, 0.8));
 var torchLight = new THREE.PointLight(0xff7722, 4.0, 14);
 torchLight.castShadow = true;
 torchLight.shadow.mapSize.width = 512;
@@ -549,7 +605,7 @@ var remoteGeo = new THREE.BoxGeometry(0.9, 1.9, 0.9);
                 for (var row = 0; row < BROWS; row++) {
                     for (var col = 0; col < BCOLS; col++) {
                         var seed = brickRng(col + gx*17.3 + fi*99, row + gz*13.7);
-                        var dep = 0.18;
+                        var dep = 0.10;
                         dummy.position.set(
                             wx + (col - BCOLS/2 + 0.5) * BW,
                             (row + 0.5) * BH,
@@ -580,7 +636,7 @@ var remoteGeo = new THREE.BoxGeometry(0.9, 1.9, 0.9);
                 for (var row2 = 0; row2 < BROWS; row2++) {
                     for (var col2 = 0; col2 < BCOLS; col2++) {
                         var seed2 = brickRng(col2 + gx*17.3 + fi2*99 + 50, row2 + gz*13.7);
-                        var dep2 = 0.18;
+                        var dep2 = 0.10;
                         dummy.position.set(
                             wx + sX * (CELL/2 + dep2/2),
                             (row2 + 0.5) * BH,
@@ -669,10 +725,12 @@ function spawnSpark(x, y, z) {
 // ── Game state ──
 var enemies = [], items = [], player = {}, gameOver = false, won = false, gameRunning = false;
 var paused = false;
-var dmgFlashEl = document.getElementById("dmg-flash");
-var floatNumsEl = document.getElementById("float-numbers");
-var pauseMenuEl = document.getElementById("pause-menu");
+var dmgFlashEl = null; // Disabled to avoid full-screen dark/flash overlays.
+var floatNumsEl  = document.getElementById("float-numbers");
+var pauseMenuEl  = document.getElementById("pause-menu");
 var fpsCounterEl = document.getElementById("fps-counter");
+var vigEl        = document.getElementById("vignette");    // cached — was re-queried 4x per frame
+var healthFillEl = document.getElementById("health-fill"); // cached — was re-queried every frame
 
 // ── FPS tracking ──
 var fpsFrames = 0, fpsAccum = 0, fpsDisplay = 60;
@@ -776,7 +834,7 @@ function addBloodSplat(x, z) {
 // ── Sticky-key-proof input system ──
 // Track keys by e.code + timestamp; auto-expire after 2s if keyup missed
 var keyDownAt = Object.create(null);
-var KEY_TIMEOUT = 2000;
+var KEY_TIMEOUT = 500; // short timeout — keyup handles cleanup; long timeout caused random movement stops
 function isKeyDown(code) {
     if (!keyDownAt[code]) return false;
     if (performance.now() - keyDownAt[code] > KEY_TIMEOUT) { delete keyDownAt[code]; return false; }
@@ -794,6 +852,13 @@ document.addEventListener("keydown", function(e) {
         if (GAME_KEYS.indexOf(e.code) >= 0) e.preventDefault();
     } else {
         if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Space"].indexOf(e.code) >= 0) e.preventDefault();
+    }
+    // Debug windows toggle (backtick)
+    if (e.code === "Backquote") {
+        ["dbg-win1","dbg-win2","dbg-win3"].forEach(function(id) {
+            var el = document.getElementById(id);
+            if (el) el.classList.toggle("hidden");
+        });
     }
     // Pause toggle
     if (e.code === "Escape" && gameRunning && !gameOver && !won) {
@@ -813,6 +878,135 @@ window.addEventListener("blur", clearAllKeys);
 document.addEventListener("visibilitychange", function() {
     if (document.hidden) clearAllKeys();
 });
+
+// ── Debug windows ──
+(function() {
+    // Make each window draggable by its title bar
+    function makeDraggable(winEl) {
+        var bar = winEl.querySelector(".dbg-win-bar");
+        if (!bar) return;
+        var dragging = false, ox = 0, oy = 0;
+        bar.addEventListener("mousedown", function(e) {
+            if (e.target.classList.contains("dbg-close")) return;
+            dragging = true;
+            ox = e.clientX - winEl.offsetLeft;
+            oy = e.clientY - winEl.offsetTop;
+            winEl.style.right = "auto";
+            e.preventDefault();
+        });
+        document.addEventListener("mousemove", function(e) {
+            if (!dragging) return;
+            winEl.style.left = (e.clientX - ox) + "px";
+            winEl.style.top  = (e.clientY - oy) + "px";
+        });
+        document.addEventListener("mouseup", function() { dragging = false; });
+    }
+    ["dbg-win1","dbg-win2","dbg-win3"].forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) makeDraggable(el);
+    });
+})();
+
+// Event log
+var _dbgLog = [];
+var _dbgLogEl = document.getElementById("dbg-log-list");
+function dbgLogEvent(msg, level) {
+    var now = new Date();
+    var ts = now.getHours().toString().padStart(2,"0") + ":" +
+             now.getMinutes().toString().padStart(2,"0") + ":" +
+             now.getSeconds().toString().padStart(2,"0");
+    _dbgLog.unshift({ ts: ts, msg: msg, level: level || "info" });
+    if (_dbgLog.length > 60) _dbgLog.length = 60;
+    if (!_dbgLogEl) _dbgLogEl = document.getElementById("dbg-log-list");
+    if (_dbgLogEl) {
+        var entry = document.createElement("div");
+        entry.className = "dbg-log-entry" + (level === "warn" ? " warn" : level === "err" ? " err" : "");
+        entry.innerHTML = "<span class='dbg-log-time'>" + ts + "</span>" + msg;
+        _dbgLogEl.insertBefore(entry, _dbgLogEl.firstChild);
+        if (_dbgLogEl.children.length > 60) _dbgLogEl.removeChild(_dbgLogEl.lastChild);
+    }
+}
+
+// Track previous values so we only log on change
+var _dbgPrev = {};
+function _dbgCheck(key, val, level) {
+    if (_dbgPrev[key] !== val) {
+        dbgLogEvent(key + ": <b>" + val + "</b>", level || "info");
+        _dbgPrev[key] = val;
+    }
+}
+
+var _dbgThrottle = 0;
+function updateDebugPanel(isMoving, sprinting) {
+    _dbgThrottle++;
+    var allHidden = document.getElementById("dbg-win1").classList.contains("hidden") &&
+                    document.getElementById("dbg-win2").classList.contains("hidden") &&
+                    document.getElementById("dbg-win3").classList.contains("hidden");
+    if (allHidden) return;
+
+    // Always check for changes even if windows closed, to log events
+    var bgCol    = scene.background ? "#" + scene.background.getHexString() : "null";
+    var cc       = new THREE.Color(); renderer.getClearColor(cc);
+    var clearStr = "#" + cc.getHexString();
+    var fogStr   = scene.fog ? "yes" : "none";
+    var ambNode  = scene.children.find(function(c){ return c.isAmbientLight; });
+    var ambStr   = ambNode ? "#" + ambNode.color.getHexString() + " i:" + ambNode.intensity.toFixed(2) : "none";
+    var toneNames = ["None","Linear","Reinhard","Cineon","ACES","AgX","Neutral","Custom"];
+    var toneStr  = toneNames[renderer.toneMapping] || String(renderer.toneMapping);
+    // vigEl is cached at startup
+    var vigBg    = vig ? (window.getComputedStyle(vig).background || "").substring(0,50) : "?";
+    var opacStr  = canvas.style.opacity || "(default)";
+    var shadStr  = canvas.style.boxShadow || "(none)";
+    var filtStr  = renderer.domElement.style.filter || "(none)";
+    var flashStr = dmgFlashEl ? "active" : "null";
+    var movStr   = isMoving ? "YES" : "no";
+    var pauseStr = paused ? "YES" : "no";
+
+    // Log on any change
+    _dbgCheck("bg",        bgCol,    bgCol !== "#080810" ? "warn" : "info");
+    _dbgCheck("clearCol",  clearStr, clearStr !== "#080810" ? "warn" : "info");
+    _dbgCheck("fog",       fogStr,   fogStr !== "none" ? "warn" : "info");
+    _dbgCheck("ambient",   ambStr);
+    _dbgCheck("toneMap",   toneStr);
+    _dbgCheck("vigBg",     vigBg,    vigBg.indexOf("rgba(0") === -1 && vigBg !== "" ? "warn" : "info");
+    _dbgCheck("opacity",   opacStr,  opacStr !== "(default)" && opacStr !== "1" ? "warn" : "info");
+    _dbgCheck("shadow",    shadStr,  shadStr !== "(none)" && shadStr !== "none" ? "warn" : "info");
+    _dbgCheck("filter",    filtStr,  filtStr !== "(none)" && filtStr !== "none" ? "warn" : "info");
+    _dbgCheck("dmgFlash",  flashStr);
+    _dbgCheck("moving",    movStr);
+    _dbgCheck("paused",    pauseStr, paused ? "warn" : "info");
+
+    if (_dbgThrottle % 6 !== 0) return; // slow down DOM writes
+
+    // Win 1: Stats
+    var w1 = document.getElementById("dbg-win1");
+    if (w1 && !w1.classList.contains("hidden")) {
+        function sv1(id, v) { var e = document.getElementById(id); if (e) e.textContent = v; }
+        sv1("dbg-fps",      fpsDisplay + " fps");
+        sv1("dbg-moving",   movStr);
+        sv1("dbg-sprinting", sprinting ? "YES" : "no");
+        sv1("dbg-stamina",  stamina.toFixed(1) + " / " + maxStamina);
+        sv1("dbg-paused",   pauseStr);
+        sv1("dbg-camfar",   camera.far);
+        sv1("dbg-pos",      player ? (player.x.toFixed(1) + "," + player.z.toFixed(1)) : "-");
+    }
+
+    // Win 2: Visual State
+    var w2 = document.getElementById("dbg-win2");
+    if (w2 && !w2.classList.contains("hidden")) {
+        function sv2(id, v) { var e = document.getElementById(id); if (e) e.textContent = v; }
+        sv2("dbg-bg",       bgCol);
+        sv2("dbg-clear",    clearStr + " a:" + renderer.getClearAlpha().toFixed(2));
+        sv2("dbg-fog",      fogStr);
+        sv2("dbg-ambient",  ambStr);
+        sv2("dbg-tone",     toneStr);
+        sv2("dbg-vig",      vigBg.substring(0,34));
+        sv2("dbg-opacity",  opacStr);
+        sv2("dbg-shadow",   shadStr.substring(0,28));
+        sv2("dbg-filter",   filtStr);
+        sv2("dbg-dmgflash", flashStr);
+    }
+}
 
 // ── Sprint ──
 var MOVE_SPEED   = 5;
@@ -932,6 +1126,13 @@ function ensureRemoteMesh() {
 function onConnected(connection) {
     conn = connection;
     lobbyStatEl.textContent = "Connected! Starting...";
+    friendPeerJoined = true;
+    setPresence(presenceFriendEl, "Joined (P2P Connected)", "#50fa7b");
+    updateQADiagnostics("Peer connected", "Join complete", "#50fa7b");
+    if (qaJoinTimeoutHandle) {
+        clearTimeout(qaJoinTimeoutHandle);
+        qaJoinTimeoutHandle = null;
+    }
 
     conn.on("data", function(data) {
         try {
@@ -959,6 +1160,9 @@ function onConnected(connection) {
     conn.on("close", function() {
         if (remoteMesh) { scene.remove(remoteMesh); remoteMesh = null; }
         lobbyStatEl.textContent = "Partner disconnected.";
+        friendPeerJoined = false;
+        setPresence(presenceFriendEl, "Disconnected", "#ff6b6b");
+        updateQADiagnostics("Connection closed", "Disconnected", "#ff6b6b");
     });
 }
 
@@ -1008,7 +1212,8 @@ window.inviteViaSteam = function() {
                     } else {
                         window.open("steam://open/chat", "_blank");
                     }
-                    lobbyStatEl.textContent = "Steam invite unavailable here. Code copied; paste in Steam chat.";
+                    var why = (res && res.reason) ? (" (" + res.reason + ")") : "";
+                    lobbyStatEl.textContent = "Steam invite unavailable here" + why + ". Code copied; paste in Steam chat.";
                 }
             }).catch(function() {
                 window.open("steam://open/chat", "_blank");
@@ -1025,14 +1230,32 @@ window.inviteViaSteam = function() {
 
 window.hostGame = function() {
     lobbyStatEl.textContent = "Creating room...";
+    friendPeerJoined = false;
+    setPresence(presenceLobbyEl, "Creating...", "#ffb86c");
+    setPresence(presenceFriendEl, "Waiting for friend", "#ffb86c");
+    updateQADiagnostics("Creating host room", "Waiting for friend", "#ffb86c");
     peer = new Peer();
     peer.on("open", function(id) {
         roomCodeEl.textContent = id;
         if (steamBridge && steamBridge.setLobbyCode) {
-            steamBridge.setLobbyCode(id).catch(function() {});
+            steamBridge.setLobbyCode(id).then(function() {
+                refreshLobbyPresence();
+            }).catch(function() {});
         }
         document.getElementById("host-code-area").style.display = "block";
         lobbyStatEl.textContent = "Waiting for partner...";
+        setPresence(presenceLobbyEl, "Code " + id, "#8be9fd");
+        setPresence(presenceFriendEl, "Waiting for friend", "#ffb86c");
+        updateQADiagnostics("Host ready (" + id + ")", "Waiting for join", "#ffb86c");
+
+        if (qaMode === "host") {
+            navigator.clipboard.writeText(id).then(function() {
+                updateQADiagnostics("QA host ready, code copied", "Waiting for join", "#ffb86c");
+            }).catch(function() {
+                updateQADiagnostics("QA host ready", "Copy code manually", "#ffb86c");
+            });
+        }
+
         peer.on("connection", function(c) {
             onConnected(c);
             setTimeout(function() { initGame(cellCenter(1,1).x, cellCenter(1,1).z); }, 800);
@@ -1045,6 +1268,18 @@ window.joinGame = function() {
     var code = joinCodeEl.value.trim();
     if (!code) { lobbyStatEl.textContent = "Enter a room code first."; return; }
     lobbyStatEl.textContent = "Connecting...";
+    friendPeerJoined = false;
+    setPresence(presenceLobbyEl, "Joining code " + code, "#8be9fd");
+    setPresence(presenceFriendEl, "Joining...", "#ffb86c");
+    updateQADiagnostics("Joining " + code, "Connecting...", "#ffb86c");
+
+    if (qaJoinTimeoutHandle) clearTimeout(qaJoinTimeoutHandle);
+    qaJoinTimeoutHandle = setTimeout(function() {
+        if (!friendPeerJoined) {
+            updateQADiagnostics("Join attempt timeout", "No response in 12s", "#ff6b6b");
+        }
+    }, 12000);
+
     peer = new Peer();
     peer.on("open", function() {
         var c = peer.connect(code, { reliable: true });
@@ -1054,12 +1289,42 @@ window.joinGame = function() {
         });
         c.on("error", function(e) { lobbyStatEl.textContent = "Error: " + e.message; });
     });
-    peer.on("error", function(e) { lobbyStatEl.textContent = "Error: " + e.message; });
+    peer.on("error", function(e) {
+        lobbyStatEl.textContent = "Error: " + e.message;
+        updateQADiagnostics("Join failed", e.message, "#ff6b6b");
+    });
+};
+
+window.qaHost = function() {
+    qaMode = "host";
+    updateQADiagnostics("QA host start", "Creating room", "#ffb86c");
+    window.hostGame();
+};
+
+window.qaJoinFromClipboard = function() {
+    qaMode = "join";
+    updateQADiagnostics("QA join start", "Reading clipboard", "#ffb86c");
+
+    navigator.clipboard.readText().then(function(txt) {
+        var code = (txt || "").trim().split(/\s+/)[0];
+        if (!code) {
+            updateQADiagnostics("QA join failed", "Clipboard empty", "#ff6b6b");
+            return;
+        }
+        joinCodeEl.value = code;
+        updateQADiagnostics("Clipboard code loaded", "Connecting", "#8be9fd");
+        window.joinGame();
+    }).catch(function() {
+        updateQADiagnostics("Clipboard blocked", "Paste code manually", "#ffb86c");
+    });
 };
 
 function autoJoinFromLaunchArg() {
     function autoJoinCode(code) {
         if (!code) return;
+        if (code === lastAutoJoinCode) return;
+        if (gameRunning) return;
+        lastAutoJoinCode = code;
         joinCodeEl.value = code;
         lobbyStatEl.textContent = "Steam invite detected. Auto-joining lobby...";
         setTimeout(function() {
@@ -1076,15 +1341,28 @@ function autoJoinFromLaunchArg() {
         steamBridge.getLaunchLobbyCode().then(function(code2) {
             autoJoinCode((code2 || "").trim());
         }).catch(function() {});
+
+        // Poll for invite callbacks while app is open (GameLobbyJoinRequested path).
+        setInterval(function() {
+            if (gameRunning) return;
+            steamBridge.getLaunchLobbyCode().then(function(code3) {
+                autoJoinCode((code3 || "").trim());
+            }).catch(function() {});
+        }, 1500);
     }
 }
 autoJoinFromLaunchArg();
-
-// ── Game loop ──
+dbgLogEvent("Game initialized — bg:#080810 far:220");
 function animate(now) {
     requestAnimationFrame(animate);
     var dt = Math.min((now - lastTime) / 1000, 0.05);
     lastTime = now;
+
+    // Hard safety: keep render layers visible and non-dark.
+    canvas.style.boxShadow = "none";
+    if (renderer && renderer.domElement) renderer.domElement.style.opacity = "1";
+    if (vigEl) vigEl.style.background = "transparent";
+    if (pauseMenuEl && !paused) pauseMenuEl.classList.remove("active");
 
     // FPS
     fpsFrames++; fpsAccum += dt;
@@ -1175,34 +1453,6 @@ function animate(now) {
         if (dodgeLen < 0.1) { dodgeVX = 0; dodgeVZ = 0; }
     }
 
-    // ── Crouch (Ctrl) ──
-    crouching = isKeyDown("ControlLeft") || isKeyDown("ControlRight");
-
-    // ── Jump + Gravity ──
-    var onGround = playerY <= 0.001;
-    if (onGround && isKeyDown("Space")) {
-        playerVY = 7.5;
-        delete keyDownAt["Space"];
-    }
-    playerVY -= GRAVITY * dt;
-    playerY = Math.max(0, playerY + playerVY * dt);
-    if (playerY <= 0) { playerY = 0; playerVY = 0; }
-
-    // ── Dodge roll (Space mid-air OR double-tap) ──
-    if (dodgeCooldown > 0) dodgeCooldown -= dt;
-    var dodgeLen = Math.sqrt(dodgeVX*dodgeVX + dodgeVZ*dodgeVZ);
-    if (dodgeLen > 0.01) {
-        var dnx = player.x + dodgeVX * dt;
-        var dnz = player.z + dodgeVZ * dt;
-        var dgzc = Math.floor(player.z / CELL);
-        if (!isWall(Math.floor((dnx-PLAYER_RADIUS)/CELL), dgzc) && !isWall(Math.floor((dnx+PLAYER_RADIUS)/CELL), dgzc)) player.x = dnx;
-        var dgxc = Math.floor(player.x / CELL);
-        if (!isWall(dgxc, Math.floor((dnz-PLAYER_RADIUS)/CELL)) && !isWall(dgxc, Math.floor((dnz+PLAYER_RADIUS)/CELL))) player.z = dnz;
-        dodgeVX *= (1 - dt * 8);
-        dodgeVZ *= (1 - dt * 8);
-        if (dodgeLen < 0.1) { dodgeVX = 0; dodgeVZ = 0; }
-    }
-
     // ── Turning (only when pointer NOT locked — otherwise A/D strafe) ──
     if (!pointerLocked) {
         if (isKeyDown("ArrowLeft")  || isKeyDown("KeyA")) player.angle += TURN_SPEED * dt;
@@ -1213,8 +1463,11 @@ function animate(now) {
     var sprinting = (isKeyDown("ShiftLeft") || isKeyDown("ShiftRight")) && stamina > 0;
     if (sprinting) {
         stamina = Math.max(0, stamina - 45 * dt);
+        if (stamina === 0) dbgLogEvent("SPRINT EXHAUSTED — stamina hit 0", "warn");
     } else {
+        var prevStam = stamina;
         stamina = Math.min(maxStamina, stamina + 22 * dt);
+        if (prevStam === 0 && stamina > 0) dbgLogEvent("sprint recovering: " + stamina.toFixed(1), "info");
     }
     sprintFill.style.width = (stamina / maxStamina * 100) + "%";
     sprintFill.style.background = sprinting ? "#ff5555" : (stamina < 30 ? "#ffb86c" : "#50fa7b");
@@ -1235,10 +1488,19 @@ function animate(now) {
     var nz = player.z + moveZ * speed * dt;
 
     var r = PLAYER_RADIUS;
-    var gzc = Math.floor(player.z / CELL);
-    if (!isWall(Math.floor((nx-r)/CELL), gzc) && !isWall(Math.floor((nx+r)/CELL), gzc)) player.x = nx;
-    var gxc = Math.floor(player.x / CELL);
-    if (!isWall(gxc, Math.floor((nz-r)/CELL)) && !isWall(gxc, Math.floor((nz+r)/CELL))) player.z = nz;
+
+    // Sliding collision: try full move, then X-only, then Z-only.
+    // This lets the player slide along walls instead of stopping dead on corners.
+    var canX = !isWall(Math.floor((nx - r) / CELL), Math.floor((player.z - r) / CELL)) &&
+               !isWall(Math.floor((nx + r) / CELL), Math.floor((player.z - r) / CELL)) &&
+               !isWall(Math.floor((nx - r) / CELL), Math.floor((player.z + r) / CELL)) &&
+               !isWall(Math.floor((nx + r) / CELL), Math.floor((player.z + r) / CELL));
+    var canZ = !isWall(Math.floor((player.x - r) / CELL), Math.floor((nz - r) / CELL)) &&
+               !isWall(Math.floor((player.x - r) / CELL), Math.floor((nz + r) / CELL)) &&
+               !isWall(Math.floor((player.x + r) / CELL), Math.floor((nz - r) / CELL)) &&
+               !isWall(Math.floor((player.x + r) / CELL), Math.floor((nz + r) / CELL));
+    if (canX) player.x = nx;
+    if (canZ) player.z = nz;
 
     // ── Invincibility timer ──
     if (player.invincible > 0) player.invincible = Math.max(0, player.invincible - dt);
@@ -1305,23 +1567,12 @@ function animate(now) {
     if (items.every(function(i){ return i.collected; }) && enemies.every(function(e){ return !e.alive && !e.dying; })) won = true;
 
     // ── Update shader uniforms ──
-    if (wallMat.uniforms) wallMat.uniforms.time.value = now / 1000.0;
-
-    // ── Wall proximity vignette (collision feedback) ──
-    var wallVigR = PLAYER_RADIUS + 0.5;
-    var px = player.x, pz = player.z;
-    var nearWall = (
-        isWall(Math.floor((px - wallVigR) / CELL), Math.floor(pz / CELL)) ||
-        isWall(Math.floor((px + wallVigR) / CELL), Math.floor(pz / CELL)) ||
-        isWall(Math.floor(px / CELL), Math.floor((pz - wallVigR) / CELL)) ||
-        isWall(Math.floor(px / CELL), Math.floor((pz + wallVigR) / CELL))
-    );
-    canvas.style.boxShadow = nearWall
-        ? "inset 0 0 60px 30px rgba(255,80,0,0.45)"
-        : "inset 0 0 40px 10px rgba(0,0,0,0.6)";
+    var t = now / 1000.0;
+    if (wallMat.uniforms) wallMat.uniforms.time.value = t;
 
     // ── Head bob + idle breathing ──
     var isMoving = isKeyDown("KeyW") || isKeyDown("ArrowUp") || isKeyDown("KeyS") || isKeyDown("ArrowDown");
+    updateDebugPanel(isMoving, sprinting);
     if (isMoving) bobTime += dt * (sprinting ? 9 : 6);
     var bobY = isMoving ? Math.sin(bobTime) * 0.06 : 0;
     var idleBreath = !isMoving ? Math.sin(t * 0.72) * 0.018 : 0;
@@ -1351,22 +1602,15 @@ function animate(now) {
     camera.rotation.x = playerPitch;
     torchLight.position.copy(camera.position);
 
-    // ── Low HP effects: heartbeat + pulse vignette ──
+    // ── Low HP effects: heartbeat only (no dark screen overlay) ──
     if (player.hp <= 1 && !gameOver) {
         startHeartbeat();
-        var vigEl = document.getElementById("vignette");
-        if (vigEl) {
-            var pulse = 0.74 + Math.sin(t * 3.8) * 0.22;
-            vigEl.style.background = "radial-gradient(ellipse at center, transparent 30%, rgba(" + Math.round(160*pulse) + ",0,0," + (0.55 + Math.sin(t*3.8)*0.2) + ") 100%)";
-        }
     } else {
         stopHeartbeat();
-        var vigEl2 = document.getElementById("vignette");
-        if (vigEl2 && player.hp > 1) vigEl2.style.background = "radial-gradient(ellipse at center, transparent 38%, rgba(0,0,0,0.74) 100%)";
     }
+    if (vigEl) vigEl.style.background = "transparent";
 
     // ── Health bar ──
-    var healthFillEl = document.getElementById("health-fill");
     if (healthFillEl) {
         healthFillEl.style.width = (player.hp / 5 * 100) + "%";
         healthFillEl.style.background = player.hp <= 1 ? "#ff5555" : player.hp <= 2 ? "#ffb86c" : "#50fa7b";
@@ -1438,15 +1682,10 @@ function animate(now) {
         sp.mesh.material.color.setHSL(0.10 + fade * 0.05, 1.0, 0.5 + fade * 0.2);
     });
 
-    // ── Film grain overlay (canvas overlay each frame) ──
-    var grainCv = document.getElementById("minimap-canvas"); // separate from minimap, use renderer domElement trick
-    // Apply via CSS filter flicker on canvas for lightweight grain
-    var grainAmt = 0.015 + Math.random() * 0.012;
-    // Use CSS hue-rotate flicker at very small amounts as grain proxy
-    renderer.domElement.style.filter = "contrast(1.04) saturate(1.08)";
+    // Keep renderer filter disabled to avoid GPU/browser black-frame glitches.
 
     // ── Animate objects ──
-    var t = now / 1000;
+    // t already declared above
     enemies.forEach(function(e, idx) {
         if (e.dying) {
             e.dyingTimer += dt;

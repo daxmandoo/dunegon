@@ -42,6 +42,6 @@
     "license": "ISC",
     "keywords": [],
     "dependencies": {
-        "greenworks": "^0.1.0"
+        "steamworks.js": "^0.4.0"
     }
 }

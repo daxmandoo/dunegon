@@ -2,6 +2,10 @@
 const path = require("path");
 const steam = require("./steamworks");
 
+try {
+    require("steamworks.js").electronEnableSteamOverlay();
+} catch (_err) {}
+
 // Disable Chromium's pointer-lock disclosure banner (the gray bar)
 app.commandLine.appendSwitch("disable-features", "PointerLockOptions");
 
@@ -37,6 +41,9 @@ function createWindow() {
     });
     ipcMain.handle("steam:getLaunchLobbyCode", function() {
         return steam.getLaunchLobbyCode() || "";
+    });
+    ipcMain.handle("steam:getLobbyState", function() {
+        return steam.getLobbyState();
     });
     ipcMain.handle("steam:setLobbyCode", function(_event, code) {
         return steam.setLobbyCode(code || "");
