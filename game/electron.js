@@ -1,6 +1,9 @@
 ﻿const { app, BrowserWindow } = require("electron");
 const path = require("path");
 
+// Disable Chromium's pointer-lock disclosure banner (the gray bar)
+app.commandLine.appendSwitch("disable-features", "PointerLockOptions");
+
 function createWindow() {
     const win = new BrowserWindow({
         width: 1024,

@@ -11,15 +11,19 @@
         <h1>Dunegon 3D</h1>
         <p id="lobby-subtitle">A first-person dungeon crawler</p>
         <div class="lobby-btn-group">
-            <button onclick="startSolo()">Play Solo</button>
-            <button onclick="hostGame()">Host Multiplayer</button>
+            <button onclick="startSolo()">&#9654; Play Solo</button>
+            <button onclick="hostGame()" class="btn-host">&#127757; Host Online</button>
         </div>
         <div id="host-code-area" style="display:none;">
-            <p class="code-label">Share this code with your partner:</p>
+            <p class="code-label">Your invite code (share with friends worldwide):</p>
             <div id="room-code">---</div>
+            <div class="invite-btn-row">
+                <button onclick="copyCode()" id="copy-code-btn">&#128203; Copy Code</button>
+                <button onclick="inviteViaSteam()" id="steam-invite-btn">&#127381; Invite via Steam Chat</button>
+            </div>
         </div>
         <div class="lobby-join">
-            <input id="join-code" type="text" placeholder="Enter room code..." autocomplete="off" />
+            <input id="join-code" type="text" placeholder="Paste code here..." autocomplete="off" />
             <button onclick="joinGame()">Join Game</button>
         </div>
         <div id="lobby-status"></div>

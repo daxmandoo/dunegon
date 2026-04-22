@@ -82,6 +82,41 @@ body {
     user-select: all;
 }
 
+.invite-btn-row {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    margin-top: 10px;
+}
+
+.invite-btn-row button {
+    background: #282a36;
+    color: #f8f8f2;
+    border: 2px solid #6272a4;
+    padding: 9px 18px;
+    border-radius: 8px;
+    font-size: 0.88rem;
+    cursor: pointer;
+    font-family: "Courier New", monospace;
+    letter-spacing: 1px;
+    transition: all 0.18s;
+}
+
+.invite-btn-row button:hover {
+    background: #44475a;
+    border-color: #50fa7b;
+    color: #50fa7b;
+    transform: translateY(-2px);
+}
+
+#steam-invite-btn { border-color: #4a90d9; }
+#steam-invite-btn:hover { border-color: #4a90d9; color: #7fb3e8; }
+
+.btn-host { border-color: #50fa7b !important; color: #50fa7b !important; }
+.btn-host:hover { background: #1a3a28 !important; }
+
+#copy-code-btn.copied { border-color: #50fa7b; color: #50fa7b; }
+
 .lobby-join {
     display: flex;
     gap: 10px;

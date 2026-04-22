@@ -773,9 +773,15 @@ function clearAllKeys() {
     var k;
     for (k in keyDownAt) delete keyDownAt[k];
 }
+var GAME_KEYS = ["KeyW","KeyA","KeyS","KeyD","ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Space","ShiftLeft","ShiftRight","ControlLeft","ControlRight","KeyE","KeyR","Escape","Tab"];
 document.addEventListener("keydown", function(e) {
     keyDownAt[e.code] = performance.now();
-    if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Space"].indexOf(e.code) >= 0) e.preventDefault();
+    // Prevent default browser actions for all game keys while game is running
+    if (gameRunning && !gameOver && !won) {
+        if (GAME_KEYS.indexOf(e.code) >= 0) e.preventDefault();
+    } else {
+        if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Space"].indexOf(e.code) >= 0) e.preventDefault();
+    }
     // Pause toggle
     if (e.code === "Escape" && gameRunning && !gameOver && !won) {
         if (!paused) {
@@ -789,6 +795,7 @@ document.addEventListener("keydown", function(e) {
 document.addEventListener("keyup", function(e) {
     delete keyDownAt[e.code];
 });
+// Only clear keys on real focus loss, not on pointer lock change during gameplay
 window.addEventListener("blur", clearAllKeys);
 document.addEventListener("visibilitychange", function() {
     if (document.hidden) clearAllKeys();
@@ -873,7 +880,10 @@ function updateStatus() {
 
 document.addEventListener("pointerlockchange", function() {
     pointerLocked = (document.pointerLockElement === canvas);
-    if (!pointerLocked) clearAllKeys();
+    // Only clear keys when NOT actively playing (avoid killing held keys on accidental lock loss)
+    if (!pointerLocked && (!gameRunning || gameOver || won || paused)) {
+        clearAllKeys();
+    }
 });
 
 var TURN_SPEED = 1.5, PLAYER_RADIUS = 0.9;
@@ -942,6 +952,40 @@ function onConnected(connection) {
 // ── Lobby buttons ──
 window.startSolo = function() {
     initGame();
+};
+
+window.copyCode = function() {
+    var code = document.getElementById("room-code").textContent.trim();
+    if (code && code !== "---") {
+        navigator.clipboard.writeText(code).then(function() {
+            var btn = document.getElementById("copy-code-btn");
+            btn.textContent = "✓ Copied!";
+            btn.classList.add("copied");
+            setTimeout(function() { btn.textContent = "📋 Copy Code"; btn.classList.remove("copied"); }, 1800);
+        }).catch(function() {
+            // Fallback for Electron context isolation
+            var ta = document.createElement("textarea");
+            ta.value = code;
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand("copy");
+            document.body.removeChild(ta);
+            var btn2 = document.getElementById("copy-code-btn");
+            btn2.textContent = "✓ Copied!";
+            setTimeout(function() { btn2.textContent = "📋 Copy Code"; }, 1800);
+        });
+    }
+};
+
+window.inviteViaSteam = function() {
+    var code = document.getElementById("room-code").textContent.trim();
+    if (code && code !== "---") {
+        // Copy code to clipboard then open Steam chat so user can paste it
+        navigator.clipboard.writeText("Join my Dunegon 3D game! Code: " + code).catch(function() {});
+        // Open Steam overlay chat (works if game is running through Steam)
+        window.open("steam://open/chat", "_blank");
+        lobbyStatEl.textContent = "Code copied! Paste it to your Steam friend.";
+    }
 };
 
 window.hostGame = function() {
@@ -1040,6 +1084,34 @@ function animate(now) {
                 }, 400);
             }, 130);
         }
+    }
+
+    // ── Crouch (Ctrl) ──
+    crouching = isKeyDown("ControlLeft") || isKeyDown("ControlRight");
+
+    // ── Jump + Gravity ──
+    var onGround = playerY <= 0.001;
+    if (onGround && isKeyDown("Space")) {
+        playerVY = 7.5;
+        delete keyDownAt["Space"];
+    }
+    playerVY -= GRAVITY * dt;
+    playerY = Math.max(0, playerY + playerVY * dt);
+    if (playerY <= 0) { playerY = 0; playerVY = 0; }
+
+    // ── Dodge roll (Space mid-air OR double-tap) ──
+    if (dodgeCooldown > 0) dodgeCooldown -= dt;
+    var dodgeLen = Math.sqrt(dodgeVX*dodgeVX + dodgeVZ*dodgeVZ);
+    if (dodgeLen > 0.01) {
+        var dnx = player.x + dodgeVX * dt;
+        var dnz = player.z + dodgeVZ * dt;
+        var dgzc = Math.floor(player.z / CELL);
+        if (!isWall(Math.floor((dnx-PLAYER_RADIUS)/CELL), dgzc) && !isWall(Math.floor((dnx+PLAYER_RADIUS)/CELL), dgzc)) player.x = dnx;
+        var dgxc = Math.floor(player.x / CELL);
+        if (!isWall(dgxc, Math.floor((dnz-PLAYER_RADIUS)/CELL)) && !isWall(dgxc, Math.floor((dnz+PLAYER_RADIUS)/CELL))) player.z = dnz;
+        dodgeVX *= (1 - dt * 8);
+        dodgeVZ *= (1 - dt * 8);
+        if (dodgeLen < 0.1) { dodgeVX = 0; dodgeVZ = 0; }
     }
 
     // ── Crouch (Ctrl) ──
