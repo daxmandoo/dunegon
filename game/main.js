@@ -7,9 +7,19 @@ var lobbyStatEl = document.getElementById("lobby-status");
 var roomCodeEl  = document.getElementById("room-code");
 var joinCodeEl  = document.getElementById("join-code");
 var sprintFill  = document.getElementById("sprint-fill");
+var steamBridge = window.steamBridge || null;
 
 var launchParams = new URLSearchParams(window.location.search || "");
 var launchConnectLobby = (launchParams.get("connect_lobby") || "").trim();
+
+function initSteamStatus() {
+    if (!steamBridge || !steamBridge.getStatus) return;
+    steamBridge.getStatus().then(function(st) {
+        if (!st || !st.available) return;
+        lobbyStatEl.textContent = "Steamworks connected. You can invite Steam friends.";
+    }).catch(function() {});
+}
+initSteamStatus();
 
 // ── Scene ──
 var scene = new THREE.Scene();
@@ -987,7 +997,27 @@ window.inviteViaSteam = function() {
         var inviteText = "Join my Dunegon 3D game. Lobby code: " + code + "\n" +
             "Steam launch arg: +connect_lobby " + code;
         navigator.clipboard.writeText(inviteText).catch(function() {});
-        // Open Steam overlay chat (works if game is running through Steam)
+
+        if (steamBridge && steamBridge.openInviteDialog) {
+            steamBridge.openInviteDialog(code).then(function(res) {
+                if (res && res.ok) {
+                    lobbyStatEl.textContent = "Steam invite dialog opened.";
+                } else {
+                    if (steamBridge.openFriendsChat) {
+                        steamBridge.openFriendsChat();
+                    } else {
+                        window.open("steam://open/chat", "_blank");
+                    }
+                    lobbyStatEl.textContent = "Steam invite unavailable here. Code copied; paste in Steam chat.";
+                }
+            }).catch(function() {
+                window.open("steam://open/chat", "_blank");
+                lobbyStatEl.textContent = "Code copied! Paste it to your Steam friend.";
+            });
+            return;
+        }
+
+        // Fallback if Steam bridge is not available
         window.open("steam://open/chat", "_blank");
         lobbyStatEl.textContent = "Code copied! Paste it to your Steam friend.";
     }
@@ -998,6 +1028,9 @@ window.hostGame = function() {
     peer = new Peer();
     peer.on("open", function(id) {
         roomCodeEl.textContent = id;
+        if (steamBridge && steamBridge.setLobbyCode) {
+            steamBridge.setLobbyCode(id).catch(function() {});
+        }
         document.getElementById("host-code-area").style.display = "block";
         lobbyStatEl.textContent = "Waiting for partner...";
         peer.on("connection", function(c) {
@@ -1025,12 +1058,25 @@ window.joinGame = function() {
 };
 
 function autoJoinFromLaunchArg() {
-    if (!launchConnectLobby) return;
-    joinCodeEl.value = launchConnectLobby;
-    lobbyStatEl.textContent = "Steam invite detected. Auto-joining lobby...";
-    setTimeout(function() {
-        window.joinGame();
-    }, 250);
+    function autoJoinCode(code) {
+        if (!code) return;
+        joinCodeEl.value = code;
+        lobbyStatEl.textContent = "Steam invite detected. Auto-joining lobby...";
+        setTimeout(function() {
+            window.joinGame();
+        }, 250);
+    }
+
+    if (launchConnectLobby) {
+        autoJoinCode(launchConnectLobby);
+        return;
+    }
+
+    if (steamBridge && steamBridge.getLaunchLobbyCode) {
+        steamBridge.getLaunchLobbyCode().then(function(code2) {
+            autoJoinCode((code2 || "").trim());
+        }).catch(function() {});
+    }
 }
 autoJoinFromLaunchArg();
 

@@ -1,5 +1,6 @@
-﻿const { app, BrowserWindow } = require("electron");
+﻿const { app, BrowserWindow, ipcMain, shell } = require("electron");
 const path = require("path");
+const steam = require("./steamworks");
 
 // Disable Chromium's pointer-lock disclosure banner (the gray bar)
 app.commandLine.appendSwitch("disable-features", "PointerLockOptions");
@@ -26,9 +27,28 @@ function createWindow() {
         icon: path.join(__dirname, "icon.ico"),
         webPreferences: {
             nodeIntegration: false,
-            contextIsolation: true
+            contextIsolation: true,
+            preload: path.join(__dirname, "preload.js")
         }
     });
+
+    ipcMain.handle("steam:getStatus", function() {
+        return steam.getStatus();
+    });
+    ipcMain.handle("steam:getLaunchLobbyCode", function() {
+        return steam.getLaunchLobbyCode() || "";
+    });
+    ipcMain.handle("steam:setLobbyCode", function(_event, code) {
+        return steam.setLobbyCode(code || "");
+    });
+    ipcMain.handle("steam:openInviteDialog", function(_event, connectCode) {
+        return steam.openInviteDialog(connectCode || "");
+    });
+    ipcMain.handle("steam:openFriendsChat", function() {
+        shell.openExternal("steam://open/chat");
+        return { ok: true };
+    });
+
     win.setMenuBarVisibility(false);
     win.loadFile(path.join(__dirname, "index.html"), {
         query: launchConnectLobby ? { connect_lobby: launchConnectLobby } : {}
