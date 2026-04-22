@@ -8,6 +8,9 @@ var roomCodeEl  = document.getElementById("room-code");
 var joinCodeEl  = document.getElementById("join-code");
 var sprintFill  = document.getElementById("sprint-fill");
 
+var launchParams = new URLSearchParams(window.location.search || "");
+var launchConnectLobby = (launchParams.get("connect_lobby") || "").trim();
+
 // ── Scene ──
 var scene = new THREE.Scene();
 scene.background = new THREE.Color(0x080810);
@@ -980,8 +983,10 @@ window.copyCode = function() {
 window.inviteViaSteam = function() {
     var code = document.getElementById("room-code").textContent.trim();
     if (code && code !== "---") {
-        // Copy code to clipboard then open Steam chat so user can paste it
-        navigator.clipboard.writeText("Join my Dunegon 3D game! Code: " + code).catch(function() {});
+        // Copy invite text to clipboard then open Steam chat so user can paste it
+        var inviteText = "Join my Dunegon 3D game. Lobby code: " + code + "\n" +
+            "Steam launch arg: +connect_lobby " + code;
+        navigator.clipboard.writeText(inviteText).catch(function() {});
         // Open Steam overlay chat (works if game is running through Steam)
         window.open("steam://open/chat", "_blank");
         lobbyStatEl.textContent = "Code copied! Paste it to your Steam friend.";
@@ -1018,6 +1023,16 @@ window.joinGame = function() {
     });
     peer.on("error", function(e) { lobbyStatEl.textContent = "Error: " + e.message; });
 };
+
+function autoJoinFromLaunchArg() {
+    if (!launchConnectLobby) return;
+    joinCodeEl.value = launchConnectLobby;
+    lobbyStatEl.textContent = "Steam invite detected. Auto-joining lobby...";
+    setTimeout(function() {
+        window.joinGame();
+    }, 250);
+}
+autoJoinFromLaunchArg();
 
 // ── Game loop ──
 function animate(now) {
