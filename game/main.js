@@ -84,10 +84,91 @@ scene.fog = null;
 var camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 220);
 camera.rotation.order = "YXZ";
 
+// ── First-person hands + sword (Half Sword style) ──
+var handsScene  = new THREE.Scene();
+var handsCamera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 10);
+handsCamera.rotation.order = "YXZ";
+
+var skinMat   = new THREE.MeshStandardMaterial({ color: 0xc68642, roughness: 0.7, metalness: 0.0 });
+var sleeveMat = new THREE.MeshStandardMaterial({ color: 0x3a2510, roughness: 0.9, metalness: 0.0 });
+var bladeMat  = new THREE.MeshStandardMaterial({ color: 0xd0d8e8, roughness: 0.18, metalness: 0.95 });
+var guardMat  = new THREE.MeshStandardMaterial({ color: 0x8a6a20, roughness: 0.5,  metalness: 0.7  });
+var gripMat   = new THREE.MeshStandardMaterial({ color: 0x3a1a08, roughness: 0.95, metalness: 0.0  });
+
+function makeHand(mirrorX) {
+    var root = new THREE.Group();
+    var forearm = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 0.26), sleeveMat);
+    forearm.position.set(0, 0, -0.13);
+    root.add(forearm);
+    var hand = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.065, 0.10), skinMat);
+    hand.position.set(0, -0.005, 0.06);
+    root.add(hand);
+    var thumb = new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.05, 0.028), skinMat);
+    thumb.position.set(mirrorX * 0.052, -0.01, 0.035);
+    thumb.rotation.z = mirrorX * -0.4;
+    root.add(thumb);
+    for (var f = 0; f < 4; f++) {
+        var finger = new THREE.Mesh(new THREE.BoxGeometry(0.018, 0.055, 0.018), skinMat);
+        finger.position.set((f - 1.5) * 0.019, 0.042, 0.06);
+        root.add(finger);
+    }
+    return root;
+}
+
+// ── Sword assembly ──
+var swordGroup = new THREE.Group();
+var bladeMesh = new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.008, 1.22), bladeMat);
+bladeMesh.position.set(0, 0, -0.72);
+swordGroup.add(bladeMesh);
+var fullerMat2 = new THREE.MeshStandardMaterial({ color: 0x9ab0c8, roughness: 0.3, metalness: 0.8 });
+var fuller = new THREE.Mesh(new THREE.BoxGeometry(0.007, 0.009, 0.92), fullerMat2);
+fuller.position.set(0, 0, -0.66);
+swordGroup.add(fuller);
+var guardMesh = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.025, 0.032), guardMat);
+guardMesh.position.set(0, 0, 0.02);
+swordGroup.add(guardMesh);
+var gripMesh = new THREE.Mesh(new THREE.BoxGeometry(0.030, 0.030, 0.18), gripMat);
+gripMesh.position.set(0, 0, 0.13);
+swordGroup.add(gripMesh);
+var pommel = new THREE.Mesh(new THREE.SphereGeometry(0.028, 7, 5), guardMat);
+pommel.position.set(0, 0, 0.24);
+swordGroup.add(pommel);
+var rightHandGroup = new THREE.Group();
+var rightHand = makeHand(1);
+rightHandGroup.add(rightHand);
+rightHandGroup.position.set(0, 0, 0.07);
+swordGroup.add(rightHandGroup);
+var leftHandGroup = new THREE.Group();
+var leftHand = makeHand(-1);
+leftHandGroup.add(leftHand);
+leftHandGroup.position.set(0, 0, 0.22);
+swordGroup.add(leftHandGroup);
+handsScene.add(swordGroup);
+handsScene.add(new THREE.AmbientLight(0xffffff, 0.5));
+var handsLight = new THREE.PointLight(0xff8844, 2.0, 4);
+handsLight.position.set(0.2, 0.5, 0.5);
+handsScene.add(handsLight);
+// Sword physics state
+var swordVX = 0, swordVY = 0;
+var swordVZ = 0;
+var swordMouseDX = 0, swordMouseDY = 0;
+var swordCurX = 0.22, swordCurY = -0.28, swordCurZ = -0.32;
+var SWORD_REST_X = 0.22, SWORD_REST_Y = -0.28, SWORD_REST_Z = -0.32;
+var handSwingTime = 0, handSwingActive = false;
+var swordDragActive = false;
+var swordDragX = 0, swordDragY = 0;
+var swordDragVelX = 0, swordDragVelY = 0;
+var swordHoldPoseX = 0, swordHoldPoseY = 0, swordHoldPoseZ = 0;
+var swordGravY = 0, swordGravVY = 0;
+var prevCamYaw = 0, prevCamPitch = 0;
+var camFollowInit = false;
+
 var renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: false });
 var PIXEL_RATIO = 1.0; // full resolution for realistic textures
 renderer.setPixelRatio(PIXEL_RATIO);
 renderer.setSize(window.innerWidth, window.innerHeight);
+// Required for scene + hands overlay rendering in two passes.
+renderer.autoClear = false;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.NoToneMapping;
@@ -98,6 +179,8 @@ window.addEventListener("resize", function() {
     renderer.setSize(window.innerWidth, window.innerHeight);
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
+    handsCamera.aspect = window.innerWidth / window.innerHeight;
+    handsCamera.updateProjectionMatrix();
 });
 // ── Dungeon ──
 var CELL = 4, GRID = 16;
@@ -834,11 +917,9 @@ function addBloodSplat(x, z) {
 // ── Sticky-key-proof input system ──
 // Track keys by e.code + timestamp; auto-expire after 2s if keyup missed
 var keyDownAt = Object.create(null);
-var KEY_TIMEOUT = 500; // short timeout — keyup handles cleanup; long timeout caused random movement stops
+// No timeout — keyup and blur/visibilitychange are the only cleanup triggers
 function isKeyDown(code) {
-    if (!keyDownAt[code]) return false;
-    if (performance.now() - keyDownAt[code] > KEY_TIMEOUT) { delete keyDownAt[code]; return false; }
-    return true;
+    return !!keyDownAt[code];
 }
 function clearAllKeys() {
     var k;
@@ -954,7 +1035,7 @@ function updateDebugPanel(isMoving, sprinting) {
     var toneNames = ["None","Linear","Reinhard","Cineon","ACES","AgX","Neutral","Custom"];
     var toneStr  = toneNames[renderer.toneMapping] || String(renderer.toneMapping);
     // vigEl is cached at startup
-    var vigBg    = vig ? (window.getComputedStyle(vig).background || "").substring(0,50) : "?";
+    var vigBg    = vigEl ? (window.getComputedStyle(vigEl).background || "").substring(0,50) : "?";
     var opacStr  = canvas.style.opacity || "(default)";
     var shadStr  = canvas.style.boxShadow || "(none)";
     var filtStr  = renderer.domElement.style.filter || "(none)";
@@ -1045,7 +1126,35 @@ function initGame(startX, startZ) {
 
     var sx = startX !== undefined ? startX : cellCenter(1, 1).x;
     var sz = startZ !== undefined ? startZ : cellCenter(1, 1).z;
-    player = { x: sx, z: sz, angle: 0, hp: 5, score: 0, invincible: 0, kills: 0, gameStartTime: performance.now() };
+    var worldCX = GRID * CELL * 0.5;
+    var worldCZ = GRID * CELL * 0.5;
+    // Face toward dungeon center at spawn so the player does not start aimed at the spawn corner.
+    var spawnAngle = Math.atan2(sx - worldCX, sz - worldCZ);
+    player = { x: sx, z: sz, angle: spawnAngle, hp: 5, score: 0, invincible: 0, kills: 0, gameStartTime: performance.now() };
+    playerPitch = 0;
+    swordCurX = SWORD_REST_X;
+    swordCurY = SWORD_REST_Y;
+    swordCurZ = SWORD_REST_Z;
+    swordVX = 0;
+    swordVY = 0;
+    swordVZ = 0;
+    swordMouseDX = 0;
+    swordMouseDY = 0;
+    swordDragActive = false;
+    swordDragX = 0;
+    swordDragY = 0;
+    swordDragVelX = 0;
+    swordDragVelY = 0;
+    swordHoldPoseX = 0;
+    swordHoldPoseY = 0;
+    swordHoldPoseZ = 0;
+    swordGravY = 0;
+    swordGravVY = 0;
+    prevCamYaw = player.angle;
+    prevCamPitch = playerPitch;
+    camFollowInit = true;
+    handSwingActive = false;
+    handSwingTime = 0;
     lootDrops.forEach(function(l) { scene.remove(l.mesh); });
     lootDrops = [];
     playerVY = 0; playerY = 0; crouching = false; dodgeCooldown = 0;
@@ -1094,19 +1203,97 @@ document.addEventListener("pointerlockchange", function() {
 });
 
 var TURN_SPEED = 1.5, PLAYER_RADIUS = 0.9;
+var BRICK_DEP = 0.10; // matches the 3D brick protrusion depth — used for accurate wall collision
+
+// Circle vs wall-AABB collision: pushes (px,pz) out of any overlapping brick-accurate wall box.
+// Each exposed wall face is expanded outward by BRICK_DEP to match the visible brick surface.
+function resolveWallCollisions(px, pz, r) {
+    var gx0 = Math.floor(px / CELL) - 1;
+    var gz0 = Math.floor(pz / CELL) - 1;
+    // Two passes for corner stability
+    for (var pass = 0; pass < 2; pass++) {
+        for (var gz = gz0; gz <= gz0 + 2; gz++) {
+            for (var gx = gx0; gx <= gx0 + 2; gx++) {
+                if (!isWall(gx, gz)) continue;
+                // Expand each exposed face by BRICK_DEP to match visual brick surface
+                var bx1 = gx * CELL       - (!isWall(gx - 1, gz) ? BRICK_DEP : 0);
+                var bx2 = (gx + 1) * CELL + (!isWall(gx + 1, gz) ? BRICK_DEP : 0);
+                var bz1 = gz * CELL       - (!isWall(gx, gz - 1) ? BRICK_DEP : 0);
+                var bz2 = (gz + 1) * CELL + (!isWall(gx, gz + 1) ? BRICK_DEP : 0);
+                // Closest point on AABB to circle center
+                var cx = Math.max(bx1, Math.min(bx2, px));
+                var cz = Math.max(bz1, Math.min(bz2, pz));
+                var dx = px - cx, dz = pz - cz;
+                var distSq = dx * dx + dz * dz;
+                if (distSq < r * r) {
+                    if (distSq > 0.00001) {
+                        var dist = Math.sqrt(distSq);
+                        var push = r - dist;
+                        px += (dx / dist) * push;
+                        pz += (dz / dist) * push;
+                    } else {
+                        // Center inside wall — eject toward nearest face
+                        var dl = px - bx1, dr = bx2 - px;
+                        var db = pz - bz1, df = bz2 - pz;
+                        var m = Math.min(dl, dr, db, df);
+                        if      (m === dl) px = bx1 - r;
+                        else if (m === dr) px = bx2 + r;
+                        else if (m === db) pz = bz1 - r;
+                        else              pz = bz2 + r;
+                    }
+                }
+            }
+        }
+    }
+    return { x: px, z: pz };
+}
 var pointerLocked = false;
 const MOUSE_SENSITIVITY = 0.0022;
 var playerPitch = 0;
 var bobTime = 0;
 
 // ── Pointer Lock (Mouse Look) ──
-canvas.addEventListener("click", function() {
-    if (!pointerLocked) canvas.requestPointerLock();
+canvas.addEventListener("mousedown", function(e) {
+    if (!pointerLocked) { canvas.requestPointerLock(); return; }
+    if (!gameRunning || gameOver || won) return;
+    if (e.button === 0) {
+        // Left-hold: grab sword and drag it like a physics object.
+        swordDragActive = true;
+        handSwingActive = false;
+        handSwingTime = 0;
+    } else if (e.button === 2 && !handSwingActive) {
+        // Right-click: heavy horizontal slash — big lateral impulse
+        swordVX -= 0.38;
+        swordVY -= 0.12;
+    }
 });
+document.addEventListener("mouseup", function(e) {
+    if (e.button !== 0) return;
+    if (!swordDragActive) return;
+    swordDragActive = false;
+    // Release momentum fling.
+    swordVX += swordDragVelX * 1.5;
+    swordVY += swordDragVelY * 1.5;
+    swordVZ += (-swordDragVelY) * 0.35;
+});
+canvas.addEventListener("contextmenu", function(e) { e.preventDefault(); });
 document.addEventListener("mousemove", function(e) {
     if (pointerLocked && gameRunning && !gameOver && !won) {
         player.angle -= e.movementX * MOUSE_SENSITIVITY;
-        playerPitch = Math.max(-0.45, Math.min(0.45, playerPitch - e.movementY * MOUSE_SENSITIVITY));
+        playerPitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, playerPitch - e.movementY * MOUSE_SENSITIVITY));
+        swordMouseDX += e.movementX;
+        swordMouseDY += e.movementY;
+        if (swordDragActive) {
+            swordDragX += e.movementX * 0.0038;
+            swordDragY += e.movementY * 0.0032;
+            if (swordDragX < -0.34) swordDragX = -0.34;
+            if (swordDragX > 0.34) swordDragX = 0.34;
+            if (swordDragY < -0.28) swordDragY = -0.28;
+            if (swordDragY > 0.28) swordDragY = 0.28;
+            // Smoothed release velocity from recent drag motion.
+            swordDragVelX = swordDragVelX * 0.7 + e.movementX * 0.020;
+            swordDragVelY = swordDragVelY * 0.7 + e.movementY * 0.018;
+        }
     }
 });
 var lastTime = performance.now();
@@ -1355,8 +1542,13 @@ autoJoinFromLaunchArg();
 dbgLogEvent("Game initialized — bg:#080810 far:220");
 function animate(now) {
     requestAnimationFrame(animate);
+    if (!Number.isFinite(now)) now = performance.now();
+    if (!Number.isFinite(lastTime)) lastTime = now;
     var dt = Math.min((now - lastTime) / 1000, 0.05);
+    if (!Number.isFinite(dt) || dt < 0) dt = 0;
     lastTime = now;
+    var prePlayerX = player && Number.isFinite(player.x) ? player.x : 0;
+    var prePlayerZ = player && Number.isFinite(player.z) ? player.z : 0;
 
     // Hard safety: keep render layers visible and non-dark.
     canvas.style.boxShadow = "none";
@@ -1369,7 +1561,11 @@ function animate(now) {
     if (fpsAccum >= 0.5) { fpsDisplay = Math.round(fpsFrames / fpsAccum); fpsFrames = 0; fpsAccum = 0; }
     if (fpsCounterEl) fpsCounterEl.textContent = fpsDisplay + " fps";
 
+    renderer.clear(true, true, true);
     renderer.render(scene, camera);
+    // Render hands on top (clear depth only so hands always show)
+    renderer.clearDepth();
+    renderer.render(handsScene, handsCamera);
     if (!gameRunning || paused) return;
 
     if (isKeyDown("KeyR")) {
@@ -1442,12 +1638,8 @@ function animate(now) {
     if (dodgeCooldown > 0) dodgeCooldown -= dt;
     var dodgeLen = Math.sqrt(dodgeVX*dodgeVX + dodgeVZ*dodgeVZ);
     if (dodgeLen > 0.01) {
-        var dnx = player.x + dodgeVX * dt;
-        var dnz = player.z + dodgeVZ * dt;
-        var dgzc = Math.floor(player.z / CELL);
-        if (!isWall(Math.floor((dnx-PLAYER_RADIUS)/CELL), dgzc) && !isWall(Math.floor((dnx+PLAYER_RADIUS)/CELL), dgzc)) player.x = dnx;
-        var dgxc = Math.floor(player.x / CELL);
-        if (!isWall(dgxc, Math.floor((dnz-PLAYER_RADIUS)/CELL)) && !isWall(dgxc, Math.floor((dnz+PLAYER_RADIUS)/CELL))) player.z = dnz;
+        var dr = resolveWallCollisions(player.x + dodgeVX * dt, player.z + dodgeVZ * dt, PLAYER_RADIUS);
+        player.x = dr.x; player.z = dr.z;
         dodgeVX *= (1 - dt * 8);
         dodgeVZ *= (1 - dt * 8);
         if (dodgeLen < 0.1) { dodgeVX = 0; dodgeVZ = 0; }
@@ -1455,8 +1647,8 @@ function animate(now) {
 
     // ── Turning (only when pointer NOT locked — otherwise A/D strafe) ──
     if (!pointerLocked) {
-        if (isKeyDown("ArrowLeft")  || isKeyDown("KeyA")) player.angle += TURN_SPEED * dt;
-        if (isKeyDown("ArrowRight") || isKeyDown("KeyD")) player.angle -= TURN_SPEED * dt;
+        if (isKeyDown("ArrowLeft"))  player.angle += TURN_SPEED * dt;
+        if (isKeyDown("ArrowRight")) player.angle -= TURN_SPEED * dt;
     }
 
     // ── Sprint stamina ──
@@ -1472,35 +1664,23 @@ function animate(now) {
     sprintFill.style.width = (stamina / maxStamina * 100) + "%";
     sprintFill.style.background = sprinting ? "#ff5555" : (stamina < 30 ? "#ffb86c" : "#50fa7b");
 
-    // ── Movement (normalized so diagonal isn't faster) ──
+    // ── Movement: A/D always strafe, W/S forward/back, full diagonal support ──
     var speed = (sprinting ? SPRINT_SPEED : MOVE_SPEED) + (player.speedBoost || 0);
     var sinA = Math.sin(player.angle), cosA = Math.cos(player.angle);
     var moveX = 0, moveZ = 0;
     var fwd     = (isKeyDown("ArrowUp")    || isKeyDown("KeyW")) ? 1 : 0;
     var back    = (isKeyDown("ArrowDown")  || isKeyDown("KeyS")) ? 1 : 0;
-    var strafeL = (pointerLocked && (isKeyDown("KeyA") || isKeyDown("ArrowLeft")))  ? 1 : 0;
-    var strafeR = (pointerLocked && (isKeyDown("KeyD") || isKeyDown("ArrowRight"))) ? 1 : 0;
-    moveX += -sinA * (fwd - back) + (-cosA) * (strafeL - strafeR);
-    moveZ += -cosA * (fwd - back) + ( sinA) * (strafeL - strafeR);
-    var moveLen = Math.sqrt(moveX*moveX + moveZ*moveZ);
+    var strafeL = (isKeyDown("KeyA") || (isKeyDown("ArrowLeft")  && pointerLocked)) ? 1 : 0;
+    var strafeR = (isKeyDown("KeyD") || (isKeyDown("ArrowRight") && pointerLocked)) ? 1 : 0;
+    moveX = -sinA * (fwd - back) + (-cosA) * (strafeL - strafeR);
+    moveZ = -cosA * (fwd - back) + ( sinA) * (strafeL - strafeR);
+    var moveLen = Math.sqrt(moveX * moveX + moveZ * moveZ);
     if (moveLen > 1.0) { moveX /= moveLen; moveZ /= moveLen; }
     var nx = player.x + moveX * speed * dt;
     var nz = player.z + moveZ * speed * dt;
 
-    var r = PLAYER_RADIUS;
-
-    // Sliding collision: try full move, then X-only, then Z-only.
-    // This lets the player slide along walls instead of stopping dead on corners.
-    var canX = !isWall(Math.floor((nx - r) / CELL), Math.floor((player.z - r) / CELL)) &&
-               !isWall(Math.floor((nx + r) / CELL), Math.floor((player.z - r) / CELL)) &&
-               !isWall(Math.floor((nx - r) / CELL), Math.floor((player.z + r) / CELL)) &&
-               !isWall(Math.floor((nx + r) / CELL), Math.floor((player.z + r) / CELL));
-    var canZ = !isWall(Math.floor((player.x - r) / CELL), Math.floor((nz - r) / CELL)) &&
-               !isWall(Math.floor((player.x - r) / CELL), Math.floor((nz + r) / CELL)) &&
-               !isWall(Math.floor((player.x + r) / CELL), Math.floor((nz - r) / CELL)) &&
-               !isWall(Math.floor((player.x + r) / CELL), Math.floor((nz + r) / CELL));
-    if (canX) player.x = nx;
-    if (canZ) player.z = nz;
+    var rp = resolveWallCollisions(nx, nz, PLAYER_RADIUS);
+    player.x = rp.x; player.z = rp.z;
 
     // ── Invincibility timer ──
     if (player.invincible > 0) player.invincible = Math.max(0, player.invincible - dt);
@@ -1516,10 +1696,8 @@ function animate(now) {
         if (dist > 0.8) {
             var enx = e.x + (dx/dist) * ENEMY_SPEED * dt;
             var enz = e.z + (dz/dist) * ENEMY_SPEED * dt;
-            var egzc = Math.floor(e.z / CELL);
-            if (!isWall(Math.floor((enx-er)/CELL), egzc) && !isWall(Math.floor((enx+er)/CELL), egzc)) e.x = enx;
-            var egxc = Math.floor(e.x / CELL);
-            if (!isWall(egxc, Math.floor((enz-er)/CELL)) && !isWall(egxc, Math.floor((enz+er)/CELL))) e.z = enz;
+            var re = resolveWallCollisions(enx, enz, er);
+            e.x = re.x; e.z = re.z;
         }
         // Damage player if touching
         if (dist < 1.3 && !player.invincible) {
@@ -1571,8 +1749,13 @@ function animate(now) {
     if (wallMat.uniforms) wallMat.uniforms.time.value = t;
 
     // ── Head bob + idle breathing ──
-    var isMoving = isKeyDown("KeyW") || isKeyDown("ArrowUp") || isKeyDown("KeyS") || isKeyDown("ArrowDown");
-    updateDebugPanel(isMoving, sprinting);
+    var isMoving =
+        isKeyDown("KeyW") || isKeyDown("ArrowUp") ||
+        isKeyDown("KeyS") || isKeyDown("ArrowDown") ||
+        isKeyDown("KeyA") || isKeyDown("KeyD") ||
+        (pointerLocked && (isKeyDown("ArrowLeft") || isKeyDown("ArrowRight"))) ||
+        (Math.abs(dodgeVX) + Math.abs(dodgeVZ) > 0.05);
+    try { updateDebugPanel(isMoving, sprinting); } catch (_e) {}
     if (isMoving) bobTime += dt * (sprinting ? 9 : 6);
     var bobY = isMoving ? Math.sin(bobTime) * 0.06 : 0;
     var idleBreath = !isMoving ? Math.sin(t * 0.72) * 0.018 : 0;
@@ -1597,10 +1780,141 @@ function animate(now) {
     var shakeY = player.invincible > 0 ? (Math.random()-0.5)*0.03 : 0;
     // ── Camera (includes jump offset + crouch) ──
     var camHeight = crouching ? CELL * 0.32 : CELL * 0.55;
-    camera.position.set(player.x + shakeX, camHeight + bobY + idleBreath + shakeY + playerY, player.z);
+    var camX = player.x + shakeX;
+    var camY = camHeight + bobY + idleBreath + shakeY + playerY;
+    var camZ = player.z;
+    if (!Number.isFinite(camX) || !Number.isFinite(camY) || !Number.isFinite(camZ)) {
+        camX = player.x || 0;
+        camY = CELL * 0.55;
+        camZ = player.z || 0;
+    }
+    camera.position.set(camX, camY, camZ);
     camera.rotation.y = player.angle;
     camera.rotation.x = playerPitch;
     torchLight.position.copy(camera.position);
+
+    // Camera angular velocity drives hand/sword follow when looking around.
+    if (!camFollowInit) {
+        prevCamYaw = camera.rotation.y;
+        prevCamPitch = camera.rotation.x;
+        camFollowInit = true;
+    }
+    var yawDelta = camera.rotation.y - prevCamYaw;
+    if (yawDelta > Math.PI) yawDelta -= Math.PI * 2;
+    if (yawDelta < -Math.PI) yawDelta += Math.PI * 2;
+    var pitchDelta = camera.rotation.x - prevCamPitch;
+    var camYawVel = yawDelta / Math.max(dt, 0.0001);
+    var camPitchVel = pitchDelta / Math.max(dt, 0.0001);
+    prevCamYaw = camera.rotation.y;
+    prevCamPitch = camera.rotation.x;
+
+    // ── Sword physics (Half Sword style) ──
+    var handBobY = isMoving ? Math.sin(bobTime * 1.0) * 0.018 : Math.sin(t * 0.7) * 0.006;
+    var handBobX = isMoving ? Math.sin(bobTime * 0.5) * 0.010 : 0;
+    var lookDX = swordMouseDX;
+    var lookDY = swordMouseDY;
+    // Drive hand influence from actual player displacement (works for all movement sources)
+    var frameMoveX = player.x - prePlayerX;
+    var frameMoveZ = player.z - prePlayerZ;
+    var strafeMove = (-frameMoveX * cosA) + (frameMoveZ * sinA);
+    var forwardMove = -(frameMoveX * sinA) - (frameMoveZ * cosA);
+    // Blend actual displacement with movement intent so sword/hands never feel frozen against collision edges.
+    var strafeIntent = (strafeR - strafeL) * (speed * dt);
+    var forwardIntent = (fwd - back) * (speed * dt);
+    strafeMove = strafeMove * 0.55 + strafeIntent * 0.45;
+    forwardMove = forwardMove * 0.55 + forwardIntent * 0.45;
+    var moveInfX = Math.max(-0.12, Math.min(0.12, strafeMove * 12.0));
+    var moveInfY = Math.max(-0.07, Math.min(0.07, -forwardMove * 9.0));
+    var lookInfX = Math.max(-0.06, Math.min(0.06, -lookDX * 0.00055));
+    var lookInfY = Math.max(-0.05, Math.min(0.05, -lookDY * 0.00045));
+    var pitchInf = Math.max(-0.10, Math.min(0.10, -playerPitch * 0.10));
+    var camLookInfX = Math.max(-0.10, Math.min(0.10, -camYawVel * 0.009));
+    var camLookInfY = Math.max(-0.08, Math.min(0.08, -camPitchVel * 0.010));
+    if (!swordDragActive) {
+        swordDragX *= 0.88;
+        swordDragY *= 0.88;
+        swordDragVelX *= 0.85;
+        swordDragVelY *= 0.85;
+    } else {
+        swordDragVelX *= 0.94;
+        swordDragVelY *= 0.94;
+    }
+    var dragInfX = swordDragX;
+    var dragInfY = swordDragY;
+    var holdTargetX = swordDragActive ? -0.05 : 0;
+    var holdTargetY = swordDragActive ? 0.12 : 0;
+    var holdTargetZ = swordDragActive ? 0.22 : 0;
+    var holdLerp = Math.min(1, dt * (swordDragActive ? 13.0 : 7.5));
+    swordHoldPoseX += (holdTargetX - swordHoldPoseX) * holdLerp;
+    swordHoldPoseY += (holdTargetY - swordHoldPoseY) * holdLerp;
+    swordHoldPoseZ += (holdTargetZ - swordHoldPoseZ) * holdLerp;
+
+    var dragGain = swordDragActive ? 0.0085 : 0.0028;
+    swordVX += swordMouseDX * dragGain;
+    swordVY += swordMouseDY * dragGain;
+    if (swordDragActive) {
+        // While held, direct dragging strongly drives angular velocity.
+        swordVX += swordDragVelX * 0.22;
+        swordVY += swordDragVelY * 0.20;
+    }
+    // Sword gravity / inertia in hand-space vertical axis.
+    if (swordDragActive) {
+        swordGravVY += (-swordDragVelY) * 0.02;
+    } else {
+        swordGravVY -= 2.6 * dt;
+    }
+    swordGravVY *= 0.96;
+    swordGravY += swordGravVY * dt;
+    // Soft bounds + bounce.
+    if (swordGravY < -0.16) {
+        swordGravY = -0.16;
+        if (swordGravVY < 0) swordGravVY *= -0.35;
+    }
+    if (swordGravY > 0.08) {
+        swordGravY = 0.08;
+        if (swordGravVY > 0) swordGravVY *= -0.35;
+    }
+    // Gentle return toward neutral so it does not drift forever.
+    swordGravY += (0 - swordGravY) * Math.min(1, dt * 2.2);
+
+    swordMouseDX = 0; swordMouseDY = 0;
+    swordVX += (SWORD_REST_X + handBobX + moveInfX + lookInfX + camLookInfX + dragInfX + swordHoldPoseX - swordCurX) * 9.0 * dt;
+    swordVY += (SWORD_REST_Y + handBobY + moveInfY + lookInfY + camLookInfY + pitchInf + dragInfY + swordGravY + swordHoldPoseY - swordCurY) * 9.0 * dt;
+    var fwdZInf = Math.max(-0.06, Math.min(0.06, forwardMove * 6.0));
+    var lookZInf = Math.max(-0.05, Math.min(0.05, lookDY * 0.00045));
+    var dragZInf = Math.max(-0.12, Math.min(0.12, -swordDragY * 0.35));
+    var targetZ = SWORD_REST_Z - fwdZInf - lookZInf + dragZInf + swordGravY * 0.24 + swordHoldPoseZ;
+    swordVZ += (targetZ - swordCurZ) * 8.0 * dt;
+    var damp = swordDragActive ? 0.90 : 0.82;
+    swordVX *= damp; swordVY *= damp;
+    swordVZ *= (swordDragActive ? 0.92 : 0.86);
+    swordCurX += swordVX; swordCurY += swordVY;
+    swordCurZ += swordVZ;
+    var _offX = swordCurX - SWORD_REST_X, _offY = swordCurY - SWORD_REST_Y;
+    var _offLen = Math.sqrt(_offX*_offX + _offY*_offY);
+    if (_offLen > 0.55) { swordCurX = SWORD_REST_X + _offX/_offLen*0.55; swordCurY = SWORD_REST_Y + _offY/_offLen*0.55; }
+    swordGroup.position.set(swordCurX, swordCurY, swordCurZ);
+    swordGroup.rotation.z = -swordVX * 2.2 + moveInfX * -2.3 + lookInfX * -1.8 + camLookInfX * -1.2 + dragInfX * -1.6;
+    swordGroup.rotation.x =  swordVY * 1.8 + 0.22 + moveInfY * 2.2 + lookInfY * 2.0 + camLookInfY * 1.3 + pitchInf * 1.3 + dragInfY * 1.5 + swordGravY * 2.8;
+    swordGroup.rotation.y = -swordVX * 1.2 + moveInfX * 1.1 + lookInfX * 1.5 + camLookInfX * 1.0 + dragInfX * 0.9;
+    // Hands grip-follow the sword so they always track movement + look.
+    rightHandGroup.position.set(0.01 + moveInfX * 0.16 + swordHoldPoseX * 0.35, 0.00 + moveInfY * 0.10 + swordGravY * 0.18 + swordHoldPoseY * 0.35, 0.07 + (swordCurZ - SWORD_REST_Z) * 0.35 + swordHoldPoseZ * 0.18);
+    leftHandGroup.position.set(-0.01 + moveInfX * 0.12 + swordHoldPoseX * 0.28, 0.00 + moveInfY * 0.08 + swordGravY * 0.14 + swordHoldPoseY * 0.28, 0.22 + (swordCurZ - SWORD_REST_Z) * 0.26 + swordHoldPoseZ * 0.14);
+    rightHandGroup.rotation.x = swordGroup.rotation.x * 0.32;
+    rightHandGroup.rotation.y = swordGroup.rotation.y * 0.24;
+    rightHandGroup.rotation.z = swordGroup.rotation.z * 0.28;
+    leftHandGroup.rotation.x = swordGroup.rotation.x * 0.26;
+    leftHandGroup.rotation.y = swordGroup.rotation.y * 0.18;
+    leftHandGroup.rotation.z = swordGroup.rotation.z * 0.22;
+    if (handSwingActive) {
+        handSwingTime += dt * 10;
+        var _thr = Math.sin(handSwingTime);
+        swordGroup.position.z = SWORD_REST_Z - _thr * 0.28;
+        swordGroup.rotation.x = 0.22 - _thr * 0.5;
+        if (handSwingTime > Math.PI) { handSwingActive = false; handSwingTime = 0; }
+    }
+    // Keep hands camera matched to main camera rotation
+    handsCamera.rotation.copy(camera.rotation);
 
     // ── Low HP effects: heartbeat only (no dark screen overlay) ──
     if (player.hp <= 1 && !gameOver) {
